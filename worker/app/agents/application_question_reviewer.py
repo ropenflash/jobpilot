@@ -93,12 +93,16 @@ def _flatten_evidence(value: Any, source: str, path: str, output: list[dict]):
 
 def build_evidence(career_profile: dict, tailored_resume: dict | None) -> list[dict]:
     """Build traceable evidence snippets from the verified profile and tailored resume."""
-    evidence: list[dict] = []
-    _flatten_evidence(career_profile or {}, "verified_profile", "", evidence)
+    profile_evidence: list[dict] = []
+    resume_evidence: list[dict] = []
+    _flatten_evidence(career_profile or {}, "verified_profile", "", profile_evidence)
     resume_content = tailored_resume or {}
     if isinstance(resume_content, dict) and isinstance(resume_content.get("resume"), dict):
         resume_content = resume_content["resume"]
-    _flatten_evidence(resume_content, "tailored_resume", "", evidence)
+    _flatten_evidence(resume_content, "tailored_resume", "", resume_evidence)
+    # Give both source documents their own evidence budget so a rich profile cannot crowd out
+    # the tailored resume before question-specific retrieval has a chance to rank either.
+    evidence = profile_evidence + resume_evidence
 
     seen = set()
     unique = []
