@@ -53,6 +53,9 @@ type QuestionReviewItem = {
   evidence: QuestionEvidence[];
   suggested_answer?: string | null;
   profile_improvement?: string | null;
+  needs_profile_update?: boolean;
+  profile_fields_needed?: string[];
+  answer_basis?: string | null;
 };
 
 type QuestionReview = {
@@ -62,7 +65,15 @@ type QuestionReview = {
   partial_count: number;
   not_found_count: number;
   manual_review_count: number;
+  profile_update_required_count?: number;
   reviews: QuestionReviewItem[];
+  profile_update_requests?: Array<{
+    field_index: number;
+    question: string;
+    fields_needed: string[];
+    recommendation: string;
+    priority: "high" | "medium";
+  }>;
   profile_improvements: Array<{
     field_index: number;
     question: string;
@@ -499,8 +510,7 @@ export default function ApplyPage() {
                   <div>
                     <h2 className="text-lg font-semibold">Question-to-profile match</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-400">
-                      JobPilot compares each visible application question with evidence in your verified career profile and tailored resume.
-                      Suggested answers are drafts only; they are never entered or submitted automatically.
+                      JobPilot compares application questions with your verified profile and tailored resume, resolves structured facts where possible, and identifies missing details. Suggested answers are drafts only; they are never entered automatically.
                     </p>
                   </div>
                   <span className="rounded-full border border-violet-300/30 bg-violet-300/10 px-3 py-1 text-xs font-medium text-violet-200">
@@ -512,12 +522,13 @@ export default function ApplyPage() {
                     AI question review is temporarily unavailable. Do not infer answers; review your profile and resume manually.
                   </p>
                 )}
-                <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                   {[
                     ["Supported", application.questionReview.supported_count],
                     ["Partial", application.questionReview.partial_count],
                     ["Not found", application.questionReview.not_found_count],
                     ["Manual", application.questionReview.manual_review_count],
+                    ["Profile updates", application.questionReview.profile_update_required_count ?? 0],
                   ].map(([label, count]) => (
                     <div key={String(label)} className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
                       <div className="text-xs text-slate-400">{label}</div>
@@ -530,8 +541,8 @@ export default function ApplyPage() {
                     <article key={review.field_index} className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <h3 className="min-w-0 flex-1 text-sm font-semibold text-slate-100">{review.question}</h3>
-                        <span className={"rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " + questionStatusStyle(review.evidence_status)}>
-                          {review.evidence_status.replaceAll("_", " ")}
+                        <span className={"rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " + questionStatusStyle(review.needs_profile_update ? "partial" : review.evidence_status)}>
+                          {review.needs_profile_update ? "profile update required" : review.evidence_status.replaceAll("_", " ")}
                         </span>
                       </div>
                       {review.reason && <p className="mt-2 text-sm leading-6 text-slate-300">{review.reason}</p>}
@@ -547,10 +558,21 @@ export default function ApplyPage() {
                           ))}
                         </div>
                       )}
+                      {review.answer_basis && (
+                        <p className="mt-2 text-xs text-slate-500">Answer basis: {review.answer_basis}</p>
+                      )}
                       {review.suggested_answer && (
                         <div className="mt-3 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.05] p-3">
                           <div className="text-xs font-semibold text-emerald-200">Evidence-backed answer draft — review before using</div>
                           <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-200">{review.suggested_answer}</p>
+                        </div>
+                      )}
+                      {!!review.profile_fields_needed?.length && (
+                        <div className="mt-3 rounded-lg border border-amber-300/15 bg-amber-300/[0.05] p-3">
+                          <div className="text-xs font-semibold text-amber-200">Missing profile fields</div>
+                          <p className="mt-1 text-sm text-slate-300">
+                            {review.profile_fields_needed.map(field => field.replaceAll("_", " ")).join(", ")}
+                          </p>
                         </div>
                       )}
                       {review.profile_improvement && (
@@ -562,6 +584,30 @@ export default function ApplyPage() {
                     </article>
                   ))}
                 </div>
+                {!!application.questionReview.profile_update_requests?.length && (
+                  <div className="mt-5 rounded-xl border border-amber-300/25 bg-amber-300/[0.07] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-semibold text-amber-100">Your profile needs more information</h3>
+                      <a href="/profile" className="text-xs font-semibold text-cyan-300 underline">Update career profile ↗</a>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      Add only accurate information. JobPilot will use the saved values the next time it reviews this application.
+                    </p>
+                    <ul className="mt-3 space-y-3">
+                      {application.questionReview.profile_update_requests.map((item, index) => (
+                        <li key={item.field_index + "-required-" + index} className="text-sm leading-6 text-slate-200">
+                          <span className="font-medium">{item.question}</span>
+                          <p className="mt-1 text-slate-300">{item.recommendation}</p>
+                          {!!item.fields_needed?.length && (
+                            <p className="mt-1 text-xs text-amber-100/80">
+                              Add: {item.fields_needed.map(field => field.replaceAll("_", " ")).join(", ")}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {!!application.questionReview.profile_improvements?.length && (
                   <div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
