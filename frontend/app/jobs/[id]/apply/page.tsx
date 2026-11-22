@@ -626,7 +626,11 @@ export default function ApplyPage() {
                           {review.evidence.map((source, index) => (
                             <div key={source.source + source.path + index} className="rounded-lg bg-white/[0.035] p-3">
                               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                {source.source === "verified_profile" ? "Verified career profile" : "Tailored resume"} · {source.path}
+                                {source.source === "verified_profile"
+                                  ? "Verified career profile"
+                                  : source.source === "saved_application_answer"
+                                    ? "Previously saved application answer"
+                                    : "Tailored resume"} · {source.path}
                               </div>
                               <p className="mt-1 text-xs leading-5 text-slate-300">{source.detail}</p>
                             </div>
