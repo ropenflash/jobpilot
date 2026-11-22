@@ -27,6 +27,7 @@ PRIVATE_LINE_PATTERN = re.compile(
     r"portfolio|date of birth|dob|current ctc|expected ctc|salary|compensation)\b",
     re.I,
 )
+PHONE_NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\+?\d[\s().-]*){9,}\d(?!\w)")
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "been", "being", "by", "can",
@@ -142,7 +143,12 @@ def sanitize_original_resume_text(text: str, career_profile: dict | None = None)
         line = _clean(raw_line)
         if not line:
             continue
-        if EMAIL_PATTERN.search(line) or URL_PATTERN.search(line) or PRIVATE_LINE_PATTERN.search(line):
+        if (
+            EMAIL_PATTERN.search(line)
+            or URL_PATTERN.search(line)
+            or PRIVATE_LINE_PATTERN.search(line)
+            or PHONE_NUMBER_PATTERN.search(line)
+        ):
             continue
         if full_name:
             line = re.sub(re.escape(full_name), "", line, flags=re.I).strip(" |,-")
