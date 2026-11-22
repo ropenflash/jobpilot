@@ -324,10 +324,19 @@ class ApplicationSessionManager:
             session.missing_required_fields = self._missing_required(session.fields)
             return self._serialize(session)
 
-    async def refresh(self, session_id: str) -> dict:
+    async def refresh(
+        self,
+        session_id: str,
+        career_profile: dict | None = None,
+        tailored_resume: dict | None = None,
+    ) -> dict:
         session = self._get_session(session_id)
         async with session.lock:
             await self._touch(session)
+            if career_profile is not None:
+                session.career_profile = career_profile
+            if tailored_resume is not None:
+                session.tailored_resume = tailored_resume
             if session.status in {"SUBMITTED", "SUBMISSION_UNKNOWN", "SUBMITTING"}:
                 return self._serialize(session)
             frame = await self._find_application_frame(session.page)
