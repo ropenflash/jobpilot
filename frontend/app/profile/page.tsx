@@ -109,10 +109,10 @@ export default function ProfilePage() {
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            {(["full_name", "email", "phone", "location", "headline", "total_experience_years"] as const).map(key => (
+            {(["full_name", "email", "phone", "location", "headline", "total_experience_years", "linkedin_url"] as const).map(key => (
               <label key={key} className="text-sm capitalize text-slate-400">
                 {key.replaceAll("_", " ")}
-                <input value={profile[key] ?? ""}
+                <input value={profile[key] ?? (key === "linkedin_url" ? profile.linkedin ?? "" : "")}
                   onChange={event => update(key, event.target.value)}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300" />
               </label>
