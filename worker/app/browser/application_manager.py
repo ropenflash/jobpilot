@@ -574,10 +574,20 @@ class ApplicationSessionManager:
             or ""
         ).strip()
         notice_answer = ""
-        if notice_period and serving_notice:
-            notice_answer = f"Official notice period: {notice_period}. Currently serving notice: {serving_notice}."
-            if serving_notice.lower() in {"yes", "true", "1", "serving"} and last_working_day:
-                notice_answer += f" Official last working day: {last_working_day}."
+        serving_normalized = serving_notice.lower()
+        is_serving = serving_normalized in {"yes", "true", "1", "serving"}
+        is_not_serving = serving_normalized in {"no", "false", "0", "not serving"}
+        # A combined notice/LWD question must remain blank until all conditional facts are known.
+        if notice_period and is_not_serving:
+            notice_answer = f"Official notice period: {notice_period}. Currently serving notice: no."
+        elif notice_period and is_serving and last_working_day:
+            notice_answer = (
+                f"Official notice period: {notice_period}. Currently serving notice: yes. "
+                f"Official last working day: {last_working_day}."
+            )
+        lwd_answer = last_working_day or (
+            "Not currently serving notice." if is_not_serving else ""
+        )
 
         currency = str(profile.get("ctc_currency") or "INR").strip().upper()
 
@@ -628,6 +638,7 @@ class ApplicationSessionManager:
             "notice_period": notice_period,
             "notice_period_answer": notice_answer,
             "last_working_day": last_working_day,
+            "last_working_day_answer": lwd_answer,
             "join_availability": join_availability,
             "current_ctc": current_ctc,
             "current_ctc_numeric": current_ctc_numeric,
@@ -732,13 +743,21 @@ class ApplicationSessionManager:
                 elif classification == "phone":
                     value = phone_value
                 elif classification == "notice_period":
+                    question_text = str(item.get("label") or "").lower()
+                    compound_notice_question = "last working day" in question_text or "serving notice" in question_text
                     if input_type == "number":
                         notice_digits = re.search(r"\d+(?:\.\d+)?", values.get("notice_period", ""))
                         value = notice_digits.group(0) if notice_digits else ""
+                    elif compound_notice_question:
+                        value = values.get("notice_period_answer", "")
                     else:
-                        value = values.get("notice_period_answer") or values.get("notice_period", "")
+                        value = values.get("notice_period", "")
                 elif classification == "last_working_day":
-                    value = values.get("last_working_day", "")
+                    value = (
+                        values.get("last_working_day_answer", "")
+                        if input_type != "date"
+                        else values.get("last_working_day", "")
+                    )
                 elif classification == "current_ctc":
                     value = values.get("current_ctc_numeric" if input_type == "number" else "current_ctc", "")
                 elif classification == "expected_ctc":
