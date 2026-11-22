@@ -9,6 +9,7 @@ A human-in-the-loop job application copilot.
 - Greenhouse Job Board API for public job-post retrieval
 - DOCX/PDF resume generation for job-specific tailoring
 - Playwright headless browser inspection of rendered Greenhouse job pages, plus human-in-the-loop application automation.
+- Question-specific retrieval-augmented application answers from the verified profile, original uploaded resume PDF and tailored resume.
 
 **Safety boundary:** JobPilot prepares and reviews application materials. No job application is submitted without explicit user confirmation in a later milestone. Never put credentials or secrets in prompts or source control.
 
@@ -174,6 +175,15 @@ python -m unittest discover -s tests -v
 6. Complete screening questions, custom dropdowns, and any manual verification in the visible Chromium window. Return to JobPilot and select **Refresh form review**.
 7. Review all fields in the browser. Check the explicit authorization box and select **Submit application** only when you are ready.
 8. JobPilot reports a submission as confirmed only when a Greenhouse application-received message is detected. If the result is uncertain, it will not retry; inspect Greenhouse and your email first.
+
+### Application question answering and evidence retrieval
+
+- Each application question retrieves a small, separate set of relevant candidate-evidence snippets using a local BM25-style hybrid ranker and curated terminology expansions.
+- The retrieval corpus includes the verified career profile, tailored resume, and text extracted in memory from the original uploaded PDF where that file is available.
+- The original PDF text is sanitized to remove obvious contact, URL, phone, compensation and sensitive-declaration lines before retrieval. Only selected snippets are sent to Gemini; the PDF and full extracted text are not stored in the application record.
+- The analyzed job description, requirements and visual findings help interpret question intent, but are never treated as proof of the candidate's experience.
+- Each AI answer draft must cite evidence retrieved for that exact question. AI drafts remain candidate-confirmation only; consent, eligibility and other sensitive declarations remain manual.
+- Retrieval is lexical BM25-style ranking with curated semantic expansions, not a vector database or embedding-based search. It can still miss wording that has no useful term overlap, so inspect citations and manually answer unsupported questions.
 
 ### Automation boundaries
 

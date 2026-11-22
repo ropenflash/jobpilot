@@ -1,0 +1,232 @@
+import json
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from app.agents.application_question_reviewer import review_application_questions
+
+
+class ApplicationAnswerRagIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reviewer_builds_question_specific_context_and_returns_cited_answer(self):
+        fields = [{
+            "index": 3,
+            "label": "Describe your experience with distributed systems.",
+            "type": "textarea",
+            "required": True,
+            "filled": False,
+            "classification": "manual",
+        }]
+        profile = {
+            "skills": ["Java", "Kafka"],
+            "experience": [{
+                "title": "Senior Backend Engineer",
+                "description": (
+                    "Designed event-driven microservices and Kafka consumers for a distributed "
+                    "order platform. Owned service reliability and production operations."
+                ),
+                "technologies": ["Java", "Spring Boot", "Kafka"],
+            }],
+        }
+        job_context = {
+            "job": {
+                "title": "Staff Backend Engineer",
+                "company": "Acme",
+                "description": "Build distributed systems for the commerce platform.",
+            },
+            "requirements": {
+                "summary": "Lead architecture for highly available services.",
+                "required_skills": ["Java", "Kafka", "Distributed systems"],
+                "responsibilities": ["Design event-driven services."],
+            },
+        }
+
+        async def model_response(messages, **kwargs):
+            prompt = json.loads(messages[1]["content"])
+            self.assertIn("Distributed systems", prompt["job_context"]["required_skills"])
+            question = prompt["questions"][0]
+            retrieved = question["retrieved_evidence"]
+            self.assertTrue(retrieved)
+            self.assertTrue(all(item["source"] == "verified_profile" for item in retrieved))
+            reference = retrieved[0]["id"]
+            return json.dumps({
+                "reviews": [{
+                    "field_index": 3,
+                    "category": "technical_experience",
+                    "evidence_status": "supported",
+                    "reason": "The work-history evidence describes event-driven microservices and Kafka.",
+                    "evidence_refs": [reference],
+                    "suggested_answer": (
+                        "I designed event-driven microservices and Kafka consumers for a distributed "
+                        "order platform, and owned production reliability."
+                    ),
+                    "profile_improvement": None,
+                }],
+                "profile_improvements": [],
+            })
+
+        with patch(
+            "app.agents.application_question_reviewer.generate_text",
+            new_callable=AsyncMock,
+            side_effect=model_response,
+        ) as generate:
+            result = await review_application_questions(
+                fields,
+                profile,
+                {"summary": "Backend engineer focused on distributed systems."},
+                job_context,
+            )
+
+        generate.assert_awaited_once()
+        review = result["reviews"][0]
+        self.assertEqual(review["evidence_status"], "supported")
+        self.assertEqual(review["retrieval"]["method"], "bm25_hybrid")
+        self.assertGreater(review["retrieval"]["retrieved_count"], 0)
+        self.assertGreater(result["rag"]["evidence_snippets_retrieved"], 0)
+        self.assertTrue(result["rag"]["job_context_available"])
+        self.assertEqual(review["evidence"][0]["source"], "verified_profile")
+
+    async def test_rag_can_recover_explicit_duration_from_tailored_resume_when_profile_has_only_skill(self):
+        fields = [{
+            "index": 0,
+            "label": "How many years of Java development experience do you have?",
+            "type": "text",
+            "required": True,
+            "filled": False,
+            "classification": "years_java",
+        }]
+        profile = {"skills": ["Java"]}
+        tailored_resume = {
+            "summary": "Backend engineer with 10 years of Java development experience."
+        }
+
+        async def model_response(messages, **kwargs):
+            prompt = json.loads(messages[1]["content"])
+            evidence = prompt["questions"][0]["retrieved_evidence"]
+            self.assertTrue(evidence)
+            source = evidence[0]
+            self.assertEqual(source["source"], "tailored_resume")
+            return json.dumps({
+                "reviews": [{
+                    "field_index": 0,
+                    "category": "technical_experience",
+                    "evidence_status": "supported",
+                    "reason": "The tailored resume explicitly states ten years of Java development.",
+                    "evidence_refs": [source["id"]],
+                    "suggested_answer": "10 years",
+                    "profile_improvement": None,
+                }],
+                "profile_improvements": [],
+            })
+
+        with patch(
+            "app.agents.application_question_reviewer.generate_text",
+            new_callable=AsyncMock,
+            side_effect=model_response,
+        ) as generate:
+            result = await review_application_questions(
+                fields,
+                profile,
+                tailored_resume,
+                {},
+            )
+
+        generate.assert_awaited_once()
+        review = result["reviews"][0]
+        self.assertEqual(review["evidence_status"], "supported")
+        self.assertEqual(review["suggested_answer"], "10 years")
+        self.assertEqual(review["evidence"][0]["source"], "tailored_resume")
+
+    async def test_original_pdf_text_can_support_answer_when_profile_and_tailored_resume_omit_it(self):
+        fields = [{
+            "index": 4,
+            "label": "Describe your experience building Kafka event pipelines.",
+            "type": "textarea",
+            "required": True,
+            "filled": False,
+            "classification": "manual",
+        }]
+        profile = {
+            "full_name": "Candidate Example",
+            "skills": ["Java"],
+            "experience": [{"title": "Backend Engineer", "description": "Built backend services."}],
+        }
+        tailored_resume = {"summary": "Backend engineer with Java service experience."}
+        source_resume_text = (
+            "Designed Kafka event pipelines for near-real-time order processing. "
+            "Implemented retry handling and dead-letter queues for failed events."
+        )
+
+        async def model_response(messages, **kwargs):
+            prompt = json.loads(messages[1]["content"])
+            question = prompt["questions"][0]
+            evidence = question["retrieved_evidence"]
+            original = [item for item in evidence if item["source"] == "original_resume"]
+            self.assertTrue(original, "Question context should retrieve evidence from the original PDF")
+            self.assertIn("Kafka event pipelines", " ".join(item["text"] for item in original))
+            return json.dumps({
+                "reviews": [{
+                    "field_index": 4,
+                    "category": "technical_experience",
+                    "evidence_status": "supported",
+                    "reason": "The original uploaded resume describes Kafka event-pipeline delivery.",
+                    "evidence_refs": [original[0]["id"]],
+                    "suggested_answer": (
+                        "I designed Kafka event pipelines for near-real-time order processing "
+                        "and implemented retry handling and dead-letter queues."
+                    ),
+                    "profile_improvement": None,
+                }],
+                "profile_improvements": [],
+            })
+
+        with patch(
+            "app.agents.application_question_reviewer.generate_text",
+            new_callable=AsyncMock,
+            side_effect=model_response,
+        ) as generate:
+            result = await review_application_questions(
+                fields,
+                profile,
+                tailored_resume,
+                {},
+                source_resume_text,
+            )
+
+        generate.assert_awaited_once()
+        review = result["reviews"][0]
+        self.assertEqual(review["evidence_status"], "supported")
+        self.assertEqual(review["evidence"][0]["source"], "original_resume")
+        self.assertEqual(review["evidence"][0]["path"], "pdf_text")
+        self.assertIn("original_resume", review["retrieval"]["sources"])
+
+    async def test_job_requirements_alone_never_become_candidate_evidence(self):
+        fields = [{
+            "index": 1,
+            "label": "Describe your Kubernetes experience.",
+            "type": "textarea",
+            "required": True,
+            "filled": False,
+            "classification": "manual",
+        }]
+        job_context = {
+            "job": {"title": "Platform Engineer"},
+            "requirements": {
+                "required_skills": ["Kubernetes"],
+                "responsibilities": ["Operate Kubernetes clusters."],
+            },
+        }
+        with patch(
+            "app.agents.application_question_reviewer.generate_text",
+            new_callable=AsyncMock,
+        ) as generate:
+            result = await review_application_questions(fields, {}, {}, job_context)
+
+        generate.assert_not_awaited()
+        review = result["reviews"][0]
+        self.assertEqual(review["evidence_status"], "not_found")
+        self.assertIsNone(review["suggested_answer"])
+        self.assertEqual(review["evidence"], [])
+        self.assertTrue(result["rag"]["job_context_available"])
+
+
+if __name__ == "__main__":
+    unittest.main()

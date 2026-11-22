@@ -8,12 +8,15 @@ class PrepareApplicationRequest(BaseModel):
     tailored_resume_base64: str = Field(min_length=16)
     tailored_resume_filename: str = Field(default="tailored-resume.pdf", min_length=1, max_length=160)
     tailored_resume: dict = Field(default_factory=dict)
+    job_context: dict = Field(default_factory=dict)
+    source_resume_base64: str | None = Field(default=None, max_length=7_000_000)
 
 
 class RefreshApplicationRequest(BaseModel):
     career_profile: dict | None = None
     tailored_resume: dict | None = None
     manual_answer: dict | None = None
+    job_context: dict | None = None
 
 
 class SubmitApplicationRequest(BaseModel):

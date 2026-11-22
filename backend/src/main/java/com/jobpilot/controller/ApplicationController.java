@@ -3,6 +3,7 @@ package com.jobpilot.controller;
 import com.jobpilot.model.ApplicationRecord;
 import com.jobpilot.model.CareerProfile;
 import com.jobpilot.model.JobRecord;
+import com.jobpilot.model.ResumeRecord;
 import com.jobpilot.model.TailoredResumeRecord;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -39,11 +40,13 @@ public class ApplicationController {
     private final MongoTemplate mongo;
     private final RestClient workerClient;
     private final Path tailoredDirectory;
+    private final Path resumeDirectory;
 
     public ApplicationController(
             MongoTemplate mongo,
             @Value("${jobpilot.worker-url:http://localhost:8000}") String workerUrl,
-            @Value("${jobpilot.tailored-dir:../storage/tailored}") String tailoredDir) {
+            @Value("${jobpilot.tailored-dir:../storage/tailored}") String tailoredDir,
+            @Value("${jobpilot.storage-dir:../storage/resumes}") String storageDir) {
         this.mongo = mongo;
         this.workerClient = RestClient.builder()
             .baseUrl(workerUrl)
@@ -52,6 +55,7 @@ public class ApplicationController {
             ))
             .build();
         this.tailoredDirectory = Path.of(tailoredDir).toAbsolutePath().normalize();
+        this.resumeDirectory = Path.of(storageDir).toAbsolutePath().normalize();
     }
 
     public record PrepareApplicationRequest(@NotBlank String tailoredResumeId, String format) {}
@@ -135,6 +139,11 @@ public class ApplicationController {
         workerRequest.put("tailored_resume_base64", Base64.getEncoder().encodeToString(resumeBytes));
         workerRequest.put("tailored_resume_filename", "tailored-resume." + format);
         workerRequest.put("tailored_resume", tailored.getResume() == null ? Map.of() : tailored.getResume());
+        workerRequest.put("job_context", buildJobContext(jobId));
+        String sourceResumeBase64 = loadSourceResumeBase64(profile.getResumeId());
+        if (sourceResumeBase64 != null) {
+            workerRequest.put("source_resume_base64", sourceResumeBase64);
+        }
 
         try {
             Map<String, Object> workerResult = workerClient.post()
@@ -201,6 +210,7 @@ public class ApplicationController {
         refreshRequest.put("career_profile", profile.getExtracted());
         refreshRequest.put("tailored_resume",
             tailored == null || tailored.getResume() == null ? Map.of() : tailored.getResume());
+        refreshRequest.put("job_context", buildJobContext(record.getJobId()));
 
         if (request != null && request.get("manualAnswer") instanceof Map<?, ?> supplied) {
             Map<String, Object> manualAnswer = new LinkedHashMap<>();
@@ -276,6 +286,57 @@ public class ApplicationController {
         applyWorkerResult(record, result);
         mongo.save(record);
         return toResponse(record);
+    }
+
+    private String loadSourceResumeBase64(String resumeId) {
+        if (resumeId == null || resumeId.isBlank()) return null;
+
+        ResumeRecord sourceResume = mongo.findById(resumeId, ResumeRecord.class);
+        if (sourceResume == null || sourceResume.getStoragePath() == null
+                || sourceResume.getStoragePath().isBlank()) {
+            return null;
+        }
+
+        try {
+            Path sourcePath = Path.of(sourceResume.getStoragePath()).toAbsolutePath().normalize();
+            if (!sourcePath.startsWith(resumeDirectory) || !Files.isRegularFile(sourcePath)) {
+                return null;
+            }
+
+            // Resolve symlinks as well as path traversal before reading candidate files.
+            Path realDirectory = resumeDirectory.toRealPath();
+            Path realSource = sourcePath.toRealPath();
+            if (!realSource.startsWith(realDirectory)) {
+                return null;
+            }
+
+            long size = Files.size(realSource);
+            if (size < 4 || size > 5L * 1024 * 1024) {
+                return null;
+            }
+            byte[] bytes = Files.readAllBytes(realSource);
+            if (bytes.length < 4 || bytes[0] != '%' || bytes[1] != 'P'
+                    || bytes[2] != 'D' || bytes[3] != 'F') {
+                return null;
+            }
+            return Base64.getEncoder().encodeToString(bytes);
+        } catch (IOException | RuntimeException ignored) {
+            // Original-resume retrieval is optional. Never block application preparation
+            // or expose local storage details if the source file is missing.
+            return null;
+        }
+    }
+
+    private Map<String, Object> buildJobContext(String jobId) {
+        JobRecord job = mongo.findById(jobId, JobRecord.class);
+        if (job == null) return Map.of();
+
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("job", job.getJob() == null ? Map.of() : job.getJob());
+        context.put("requirements", job.getRequirements() == null ? Map.of() : job.getRequirements());
+        context.put("visual_inspection",
+            job.getVisualInspection() == null ? Map.of() : job.getVisualInspection());
+        return context;
     }
 
     private Map<String, Object> callWorker(String path, Map<String, Object> body) {

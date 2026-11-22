@@ -69,6 +69,12 @@ type QuestionReviewItem = {
   answer_basis?: string | null;
   saved_profile_answer?: boolean;
   filled?: boolean;
+  retrieval?: {
+    method: string;
+    retrieved_count: number;
+    sources: string[];
+    query_terms: string[];
+  };
 };
 
 type QuestionReview = {
@@ -79,6 +85,12 @@ type QuestionReview = {
   not_found_count: number;
   manual_review_count: number;
   profile_update_required_count?: number;
+  rag?: {
+    method: string;
+    questions_with_context: number;
+    evidence_snippets_retrieved: number;
+    job_context_available: boolean;
+  };
   reviews: QuestionReviewItem[];
   profile_update_requests?: Array<{
     field_index: number;
@@ -598,6 +610,14 @@ export default function ApplyPage() {
                     {application.questionReview.questions_reviewed} questions reviewed
                   </span>
                 </div>
+                {application.questionReview.rag && (
+                  <p className="mt-3 text-xs leading-5 text-slate-400">
+                    RAG evidence retrieval: {application.questionReview.rag.evidence_snippets_retrieved} relevant profile/resume snippets retrieved for {application.questionReview.rag.questions_with_context} questions.
+                    {application.questionReview.rag.job_context_available
+                      ? " The analyzed job description and requirements were also used to interpret question intent, not as candidate evidence."
+                      : " No analyzed job context was available for this session."}
+                  </p>
+                )}
                 {application.questionReview.status === "unavailable" && (
                   <p className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-sm text-amber-100">
                     AI question review is temporarily unavailable. Do not infer answers; review your profile and resume manually.
@@ -627,6 +647,14 @@ export default function ApplyPage() {
                         </span>
                       </div>
                       {review.reason && <p className="mt-2 text-sm leading-6 text-slate-300">{review.reason}</p>}
+                      {review.retrieval && review.retrieval.retrieved_count > 0 && (
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          Retrieved {review.retrieval.retrieved_count} relevant evidence snippets
+                          {review.retrieval.sources.length
+                            ? ` from ${review.retrieval.sources.map(source => source.replaceAll("_", " ")).join(" and ")}`
+                            : ""}.
+                        </p>
+                      )}
                       {review.decision && (
                         <div className="mt-3 rounded-lg border border-cyan-300/15 bg-cyan-300/[0.045] p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -669,7 +697,9 @@ export default function ApplyPage() {
                                   ? "Verified career profile"
                                   : source.source === "saved_application_answer"
                                     ? "Previously saved application answer"
-                                    : "Tailored resume"} · {source.path}
+                                    : source.source === "original_resume"
+                                      ? "Original uploaded resume (PDF)"
+                                      : "Tailored resume"} · {source.path}
                               </div>
                               <p className="mt-1 text-xs leading-5 text-slate-300">{source.detail}</p>
                             </div>

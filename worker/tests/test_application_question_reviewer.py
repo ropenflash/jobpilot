@@ -41,6 +41,20 @@ class ApplicationQuestionReviewerTests(unittest.TestCase):
         self.assertIn("verified_profile:experience[0].description", ids)
         self.assertIn("tailored_resume:summary", ids)
 
+    def test_evidence_collection_keeps_profile_and_resume_beyond_the_old_sixty_item_limit(self):
+        profile = {
+            "skills": [f"Skill {index}" for index in range(90)],
+            "experience": [{
+                "title": "Senior Engineer",
+                "description": "Designed a high-throughput Java event platform.",
+            }],
+        }
+        resume = {"summary": "Built Kafka consumers for distributed services."}
+        evidence = build_evidence(profile, resume)
+        ids = {item["id"] for item in evidence}
+        self.assertIn("verified_profile:experience[0].description", ids)
+        self.assertIn("tailored_resume:summary", ids)
+
     def test_build_questions_preserves_radio_options_and_question_ids(self):
         questions = build_questions([{
             "index": 6,
@@ -154,7 +168,7 @@ class ApplicationQuestionSensitiveGuardTests(unittest.IsolatedAsyncioTestCase):
             await review_application_questions(
                 fields,
                 profile,
-                {"summary": "Backend engineer with distributed systems experience."},
+                {"summary": "Backend engineer with distributed systems experience; delivered technical project work."},
             )
 
         prompt_messages = generate.call_args.args[0]
