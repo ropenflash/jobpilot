@@ -154,7 +154,7 @@ class ApplicationQuestionSensitiveGuardTests(unittest.IsolatedAsyncioTestCase):
             await review_application_questions(
                 fields,
                 profile,
-                {"summary": "Backend engineer with distributed systems experience."},
+                {"summary": "Backend engineer with distributed systems experience; delivered technical project work."},
             )
 
         prompt_messages = generate.call_args.args[0]
