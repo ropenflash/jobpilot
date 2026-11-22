@@ -674,16 +674,23 @@ class ApplicationSessionManager:
 
             control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
             try:
-                if classification in {
+                if input_type == "select" and classification in {
                     "country", "city", "experience_range", "years_java", "years_spring_boot",
-                    "years_microservices", "years_kafka", "years_gcp",
-                } and input_type == "select":
+                    "years_microservices", "years_kafka", "years_gcp", "notice_period",
+                    "join_availability", "current_ctc", "expected_ctc",
+                }:
                     options = await control.locator("option").evaluate_all(
                         "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
                     )
-                    if classification in {"country", "city"}:
-                        desired = values.get(classification, "")
-                        normalized = re.sub(r"[^a-z0-9]", "", desired.lower())
+                    if classification in {"country", "city", "notice_period", "join_availability"}:
+                        desired_key = {
+                            "country": "country",
+                            "city": "city",
+                            "notice_period": "notice_period",
+                            "join_availability": "join_availability",
+                        }[classification]
+                        desired = values.get(desired_key, "")
+                        normalized = re.sub(r"[^a-z0-9]", "", str(desired).lower())
                         matches = [
                             option for option in options
                             if option.get("value") and normalized
@@ -697,6 +704,8 @@ class ApplicationSessionManager:
                             "years_microservices": "years_microservices",
                             "years_kafka": "years_kafka",
                             "years_gcp": "years_gcp",
+                            "current_ctc": "current_ctc_numeric",
+                            "expected_ctc": "expected_ctc_numeric",
                         }[classification]
                         years = values.get(years_key)
                         try:
@@ -711,10 +720,10 @@ class ApplicationSessionManager:
                     if len(matches) == 1:
                         await control.select_option(value=matches[0]["value"])
                         filled_count += 1
-                    elif classification in {"country", "city"} and desired:
+                    elif classification in {"country", "city", "notice_period", "join_availability"} and desired:
                         self._add_note(
                             session,
-                            f"{classification.title()}: no exact Greenhouse option matched the verified profile value {desired!r}; choose it manually."
+                            f"{classification.replace('_', ' ').title()}: no exact Greenhouse option matched the verified profile value {desired!r}; choose it manually."
                         )
                     continue
 
@@ -723,7 +732,11 @@ class ApplicationSessionManager:
                 elif classification == "phone":
                     value = phone_value
                 elif classification == "notice_period":
-                    value = values.get("notice_period_answer") or values.get("notice_period", "")
+                    if input_type == "number":
+                        notice_digits = re.search(r"\d+(?:\.\d+)?", values.get("notice_period", ""))
+                        value = notice_digits.group(0) if notice_digits else ""
+                    else:
+                        value = values.get("notice_period_answer") or values.get("notice_period", "")
                 elif classification == "last_working_day":
                     value = values.get("last_working_day", "")
                 elif classification == "current_ctc":
