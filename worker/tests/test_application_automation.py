@@ -99,7 +99,12 @@ class ApplicationAutomationTests(unittest.TestCase):
             {"value": "16+", "text": "16+ years"},
         ]
         self.assertEqual(_match_experience_range_option(options, 11)["value"], "11-15")
-        self.assertIsNone(_match_experience_range_option(options, 5))
+        self.assertEqual(_match_experience_range_option(options, 5)["value"], "0-5")
+        overlapping = [
+            {"value": "0-5", "text": "0-5 years"},
+            {"value": "5-10", "text": "5-10 years"},
+        ]
+        self.assertIsNone(_match_experience_range_option(overlapping, 5))
 
     def test_profile_values_split_only_a_multi_part_verified_location(self):
         values = ApplicationSessionManager()._profile_values({
