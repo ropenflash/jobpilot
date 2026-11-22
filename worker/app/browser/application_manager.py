@@ -11,7 +11,11 @@ from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
-from app.agents.application_question_reviewer import review_application_questions
+from app.agents.application_question_reviewer import build_evidence, review_application_questions
+from app.agents.application_answer_resolver import (
+    _direct_technology_years,
+    _inferred_technology_years,
+)
 
 
 ALLOWED_GREENHOUSE_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io"}
@@ -522,7 +526,7 @@ class ApplicationSessionManager:
         full_name = str(profile.get("full_name") or "").strip()
         parts = full_name.split()
         location = str(profile.get("location") or "").strip()
-        location_parts = [part.strip() for part in location.split(",") if part.strip()]
+        location_parts = [part.strip() for part in re.split(r"[,|]", location) if part.strip()]
         explicit_years = str(
             profile.get("total_experience_years")
             if profile.get("total_experience_years") is not None
@@ -531,16 +535,83 @@ class ApplicationSessionManager:
         years_match = re.match(r"^\s*(\d+(?:\.\d+)?)", explicit_years, re.I)
         experience_years = float(years_match.group(1)) if years_match else None
 
+        profile_evidence = build_evidence(profile, {})
+        technology_years = {}
+        for technology in ("java", "spring_boot", "microservices", "kafka", "gcp"):
+            years, _source = _direct_technology_years(profile, technology)
+            if years is None:
+                years, _refs = _inferred_technology_years(profile, technology, profile_evidence)
+            technology_years[technology] = years
+
+        def years_text(value):
+            if value is None:
+                return ""
+            rounded = round(float(value), 1)
+            return str(int(rounded)) if rounded.is_integer() else str(rounded)
+
+        notice_period = str(
+            profile.get("official_notice_period")
+            or profile.get("notice_period")
+            or profile.get("notice_period_days")
+            or ""
+        ).strip()
+        if notice_period and re.fullmatch(r"\d+(?:\.\d+)?", notice_period):
+            notice_period += " days"
+
+        serving_notice = str(
+            profile.get("currently_serving_notice")
+            if profile.get("currently_serving_notice") is not None
+            else profile.get("serving_notice") or ""
+        ).strip()
+        last_working_day = str(
+            profile.get("official_last_working_day")
+            or profile.get("last_working_day")
+            or ""
+        ).strip()
+        join_availability = str(
+            profile.get("join_availability")
+            or profile.get("availability_to_join")
+            or ""
+        ).strip()
+        notice_answer = ""
+        if notice_period and serving_notice:
+            notice_answer = f"Official notice period: {notice_period}. Currently serving notice: {serving_notice}."
+            if serving_notice.lower() in {"yes", "true", "1", "serving"} and last_working_day:
+                notice_answer += f" Official last working day: {last_working_day}."
+
+        currency = str(profile.get("ctc_currency") or "INR").strip().upper()
+
+        def ctc_values(key):
+            raw = str(profile.get(key) or "").strip()
+            match = re.search(r"(?<!\w)(\d+(?:\.\d+)?)", raw.replace(",", ""))
+            if not match:
+                return "", ""
+            amount = float(match.group(1))
+            numeric = str(int(amount)) if amount.is_integer() else str(amount)
+            return f"{currency} {numeric} LPA", numeric
+
+        current_ctc, current_ctc_numeric = ctc_values("current_ctc_lpa")
+        expected_ctc, expected_ctc_numeric = ctc_values("expected_ctc_lpa")
+
+        spring_boot_microservices = ""
+        spring_boot_years = technology_years["spring_boot"]
+        microservices_years = technology_years["microservices"]
+        if spring_boot_years is not None and microservices_years is not None:
+            spring_boot_microservices = (
+                f"Spring Boot: {years_text(spring_boot_years)} years; "
+                f"Microservices: {years_text(microservices_years)} years"
+            )
+
         return {
             "full_name": full_name,
             "first_name": parts[0] if parts else "",
             "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
             "email": str(profile.get("email") or "").strip(),
-            "phone": str(profile.get("phone") or "").strip(),
+            "phone": str(profile.get("phone") or profile.get("mobile") or "").strip(),
             "linkedin": str(profile.get("linkedin_url") or profile.get("linkedin") or "").strip(),
             "github": str(profile.get("github_url") or profile.get("github") or "").strip(),
             "website": str(profile.get("website") or profile.get("portfolio_url") or "").strip(),
-            # Only split the verified location string when it has multiple parts.
+            # Prefer the explicit city field; split a multi-part location only when unambiguous.
             "city": str(profile.get("city") or profile.get("location_city") or (
                 location_parts[0] if len(location_parts) >= 2 else ""
             )).strip(),
@@ -548,6 +619,20 @@ class ApplicationSessionManager:
                 location_parts[-1] if len(location_parts) >= 2 else ""
             )).strip(),
             "experience_years": experience_years,
+            "years_java": years_text(technology_years["java"]),
+            "years_spring_boot": years_text(spring_boot_years),
+            "years_microservices": years_text(microservices_years),
+            "years_spring_boot_microservices": spring_boot_microservices,
+            "years_kafka": years_text(technology_years["kafka"]),
+            "years_gcp": years_text(technology_years["gcp"]),
+            "notice_period": notice_period,
+            "notice_period_answer": notice_answer,
+            "last_working_day": last_working_day,
+            "join_availability": join_availability,
+            "current_ctc": current_ctc,
+            "current_ctc_numeric": current_ctc_numeric,
+            "expected_ctc": expected_ctc,
+            "expected_ctc_numeric": expected_ctc_numeric,
         }
 
     async def _autofill(self, session: BrowserSession, career_profile: dict) -> int:
@@ -589,7 +674,10 @@ class ApplicationSessionManager:
 
             control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
             try:
-                if classification in {"country", "city", "experience_range"} and input_type == "select":
+                if classification in {
+                    "country", "city", "experience_range", "years_java", "years_spring_boot",
+                    "years_microservices", "years_kafka", "years_gcp",
+                } and input_type == "select":
                     options = await control.locator("option").evaluate_all(
                         "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
                     )
@@ -602,10 +690,22 @@ class ApplicationSessionManager:
                             and re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()) == normalized
                         ]
                     else:
-                        years = values.get("experience_years")
-                        if years is None:
+                        years_key = {
+                            "experience_range": "experience_years",
+                            "years_java": "years_java",
+                            "years_spring_boot": "years_spring_boot",
+                            "years_microservices": "years_microservices",
+                            "years_kafka": "years_kafka",
+                            "years_gcp": "years_gcp",
+                        }[classification]
+                        years = values.get(years_key)
+                        try:
+                            years_number = float(years) if years not in (None, "") else None
+                        except (TypeError, ValueError):
+                            years_number = None
+                        if years_number is None:
                             continue
-                        match = _match_experience_range_option(options, years)
+                        match = _match_experience_range_option(options, years_number)
                         matches = [match] if match else []
 
                     if len(matches) == 1:
@@ -622,12 +722,22 @@ class ApplicationSessionManager:
                     value = values.get("city", "")
                 elif classification == "phone":
                     value = phone_value
+                elif classification == "notice_period":
+                    value = values.get("notice_period_answer") or values.get("notice_period", "")
+                elif classification == "last_working_day":
+                    value = values.get("last_working_day", "")
+                elif classification == "current_ctc":
+                    value = values.get("current_ctc_numeric" if input_type == "number" else "current_ctc", "")
+                elif classification == "expected_ctc":
+                    value = values.get("expected_ctc_numeric" if input_type == "number" else "expected_ctc", "")
+                elif classification == "years_spring_boot_microservices":
+                    value = values.get("years_spring_boot_microservices", "")
                 else:
                     value = values.get(classification, "")
 
                 if not value:
                     continue
-                if input_type not in {"text", "email", "tel", "url", "textarea"}:
+                if input_type not in {"text", "email", "tel", "url", "textarea", "number", "date"}:
                     continue
                 await control.fill(value)
                 filled_count += 1
