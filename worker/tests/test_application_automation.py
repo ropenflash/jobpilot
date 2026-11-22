@@ -5,6 +5,7 @@ from app.browser.application_manager import (
     _classify_field,
     _match_country_code_option,
     _national_number,
+    _resume_upload_score,
     _validate_greenhouse_url,
 )
 
@@ -52,6 +53,11 @@ class ApplicationAutomationTests(unittest.TestCase):
         match = _match_country_code_option(options, "+91 9876543210")
         self.assertEqual(match["calling_code"], "91")
         self.assertEqual(_national_number("+91 9876543210", "91"), "9876543210")
+
+    def test_resume_upload_score_prefers_resume_field_and_rejects_cover_letter(self):
+        self.assertEqual(_resume_upload_score({"label": "Resume / CV"}), 100)
+        self.assertEqual(_resume_upload_score({"label": "Cover letter", "accept": ".pdf"}), -1)
+        self.assertEqual(_resume_upload_score({"label": "Upload a file", "accept": ".pdf"}), 20)
 
     def test_does_not_guess_country_code_from_local_number(self):
         options = [{"value": "+91", "text": "India (+91)"}]
