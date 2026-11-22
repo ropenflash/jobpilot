@@ -210,4 +210,4 @@ async def cancel_application(session_id: str):
         return await application_sessions.cancel(session_id)
     except ApplicationAutomationError as exc:
         raise _application_error(exc) from exc
-\n
+
