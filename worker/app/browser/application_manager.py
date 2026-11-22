@@ -104,7 +104,7 @@ def _classify_field(label: str, name: str, input_type: str) -> str:
         "race", "ethnicity", "gender", "veteran", "disability",
         "sexual orientation", "pronoun", "date of birth", "citizenship",
         "work authorization", "work authorisation", "sponsorship",
-        "previously employed", "previous employment", "ever employed",
+        "previously employed", "previously been employed", "previous employment", "ever employed",
         "worked for", "eligible to work",
     )):
         return "sensitive_or_eligibility"
