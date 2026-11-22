@@ -33,8 +33,6 @@ def _flatten_evidence(value: Any, source: str, path: str, output: list[dict]):
         for key, child in value.items():
             if key in {"id", "created_at", "updated_at", "profile_updated_at"}:
                 continue
-            if source == "verified_profile" and str(key).lower() in PRIVATE_PROFILE_KEYS:
-                continue
             _flatten_evidence(child, source, f"{path}.{key}" if path else str(key), output)
             if len(output) >= MAX_EVIDENCE_ITEMS:
                 return
