@@ -38,7 +38,7 @@ def _access_token() -> str:
         credentials.refresh(Request())
     except DefaultCredentialsError as exc:
         raise VertexError(
-            "GCP credentials are not available. Run `gcloud auth application-default login`."
+            "GCP credentials are not available. Run \`gcloud auth application-default login\`."
         ) from exc
     if not credentials.token:
         raise VertexError("GCP credentials did not return an access token.")
@@ -102,8 +102,7 @@ def _read_text(body: dict) -> str:
     finish_reason = candidate.get("finishReason")
     if finish_reason == "MAX_TOKENS":
         raise VertexError(
-            "Vertex output reached its token limit. Increase VERTEX_MAX_TOKENS "
-            "or VERTEX_JOB_MAX_OUTPUT_TOKENS."
+            "Vertex output reached its token limit. Increase the configured output-token limit."
         )
     parts = ((candidate.get("content") or {}).get("parts")) or []
     texts = [

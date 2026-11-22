@@ -219,6 +219,9 @@ export default function JobsPage() {
                 <a href={active.jobUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-sm text-cyan-300 underline">
                   Open original job posting ↗
                 </a>
+                <a href={"/jobs/" + encodeURIComponent(active.id) + "/tailor"} className="mt-4 ml-4 inline-block text-sm font-semibold text-emerald-300 underline">
+                  Tailor resume for this job →
+                </a>
 
                 <div className="mt-6 border-t border-white/10 pt-5">
                   <div className="text-xs tracking-wider text-slate-400">PROFILE MATCH ESTIMATE</div>
