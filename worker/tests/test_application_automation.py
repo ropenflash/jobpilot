@@ -192,6 +192,60 @@ class ApplicationAutomationTests(unittest.TestCase):
 
 
 class AgenticFormVerificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_candidate_answer_is_applied_to_the_selected_live_field(self):
+        manager = ApplicationSessionManager()
+        typed = []
+
+        class FakeInput:
+            async def fill(self, value):
+                typed.append(value)
+
+        class FakeFieldList:
+            def nth(self, index):
+                self.asserted_index = index
+                return FakeInput()
+
+        class FakeFrame:
+            def locator(self, _selector):
+                return FakeFieldList()
+
+        raw_field = {
+            "index": 5,
+            "name": "",
+            "id": "",
+            "label": "Unlabelled field",
+            "type": "text",
+            "required": True,
+            "filled": False,
+            "checked": None,
+            "options": [],
+            "classification": "unlabelled_field",
+        }
+        session = SimpleNamespace(
+            frame=FakeFrame(),
+            fields=[],
+            manual_field_labels={},
+            automation_notes=[],
+        )
+        manager._snapshot_fields = AsyncMock(side_effect=[
+            [dict(raw_field)],
+            [dict(raw_field, filled=True)],
+        ])
+
+        await manager._apply_candidate_answer(session, {
+            "field_index": 5,
+            "question": "How many years of experience working with Kafka?",
+            "answer": "4 years",
+        })
+
+        self.assertEqual(typed, ["4 years"])
+        self.assertEqual(
+            session.fields[0]["label"],
+            "How many years of experience working with Kafka?",
+        )
+        self.assertEqual(session.fields[0]["classification"], "years_kafka")
+        self.assertEqual(session.manual_field_labels[5], "How many years of experience working with Kafka?")
+
     async def test_agent_runs_three_observe_fill_verify_passes(self):
         manager = ApplicationSessionManager()
 
