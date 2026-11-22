@@ -44,6 +44,13 @@ class ApplicationAutomationTests(unittest.TestCase):
     def test_cover_letter_is_not_mistaken_for_resume(self):
         self.assertEqual(_classify_field("Cover letter", "cover_letter", "file"), "manual")
 
+    def test_checkboxes_are_tracked_but_never_inferred(self):
+        self.assertEqual(_classify_field("I agree to the privacy policy", "privacy", "checkbox"), "checkbox_review")
+        self.assertEqual(
+            _classify_field("Work authorization", "work_authorization", "checkbox"),
+            "sensitive_or_eligibility",
+        )
+
     def test_matches_country_code_from_international_phone(self):
         options = [
             {"value": "+1", "text": "United States (+1)"},
