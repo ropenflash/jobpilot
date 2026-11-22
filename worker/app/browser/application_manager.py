@@ -518,6 +518,12 @@ class ApplicationSessionManager:
                     return
                 await control.select_option(value=matches[0]["value"])
             elif input_type in {"text", "email", "tel", "url", "textarea", "number", "date"}:
+                if input_type == "number":
+                    numeric = re.search(r"\d+(?:\.\d+)?", answer.replace(",", ""))
+                    if not numeric:
+                        self._add_note(session, "This numeric field needs a plain numeric answer. The saved profile answer was retained for future reference.")
+                        return
+                    answer = numeric.group(0)
                 await control.fill(answer)
             else:
                 self._add_note(session, "The answer is saved to your profile, but this control type needs manual entry in Chromium.")
@@ -762,7 +768,13 @@ class ApplicationSessionManager:
             if classification == "manual":
                 if saved_answer_text and input_type in {"text", "email", "tel", "url", "textarea", "number", "date"}:
                     try:
-                        await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).fill(saved_answer_text)
+                        reusable_value = saved_answer_text
+                        if input_type == "number":
+                            saved_number = re.search(r"\d+(?:\.\d+)?", saved_answer_text.replace(",", ""))
+                            reusable_value = saved_number.group(0) if saved_number else ""
+                        if not reusable_value:
+                            continue
+                        await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).fill(reusable_value)
                         filled_count += 1
                         self._add_note(session, f"Reused a previous user-confirmed answer for: {item.get('label', 'application question')}")
                     except Exception:
@@ -888,6 +900,9 @@ class ApplicationSessionManager:
                 if not value and saved_answer_text:
                     value = saved_answer_text
                     self._add_note(session, f"Reused a previous user-confirmed answer for: {item.get('label', 'application question')}")
+                if value and input_type == "number":
+                    numeric_value = re.search(r"\d+(?:\.\d+)?", str(value).replace(",", ""))
+                    value = numeric_value.group(0) if numeric_value else ""
                 if not value:
                     continue
                 if input_type not in {"text", "email", "tel", "url", "textarea", "number", "date"}:
