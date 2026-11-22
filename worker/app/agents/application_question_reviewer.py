@@ -232,7 +232,9 @@ def normalize_review(
                 "but only where those details are accurate."
             )
 
-        needs_profile_update = status in {"partial", "not_found"} and bool(profile_improvement)
+        needs_profile_update = (
+            question["required"] and status in {"partial", "not_found"} and bool(profile_improvement)
+        )
         reviews.append({
             "field_index": question["field_index"],
             "question": question["question"],
@@ -355,8 +357,8 @@ async def review_application_questions(
                 "evidence": [],
                 "suggested_answer": None,
                 "profile_improvement": recommendation,
-                "needs_profile_update": True,
-                "profile_fields_needed": ["experience_or_projects"],
+                "needs_profile_update": bool(question["required"]),
+                "profile_fields_needed": ["experience_or_projects"] if question["required"] else [],
                 "answer_basis": None,
             })
             base["not_found_count"] += 1
