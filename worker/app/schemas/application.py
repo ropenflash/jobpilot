@@ -10,5 +10,10 @@ class PrepareApplicationRequest(BaseModel):
     tailored_resume: dict = Field(default_factory=dict)
 
 
+class RefreshApplicationRequest(BaseModel):
+    career_profile: dict | None = None
+    tailored_resume: dict | None = None
+
+
 class SubmitApplicationRequest(BaseModel):
     confirm_submit: bool
