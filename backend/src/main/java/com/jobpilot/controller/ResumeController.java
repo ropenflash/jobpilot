@@ -374,8 +374,10 @@ public class ResumeController {
         return List.of(
             "privacy notice", "consent", "i agree", "race", "ethnicity", "gender",
             "disability", "veteran", "citizenship", "work authorization",
-            "work authorisation", "sponsorship", "previously employed",
-            "criminal history", "background check"
+            "work authorisation", "authorized to work", "authorised to work",
+            "sponsorship", "visa status", "right to work", "previously employed",
+            "prior employment", "criminal history", "background check",
+            "sexual orientation", "gender identity", "self identify"
         ).stream().anyMatch(text::contains);
     }
 
