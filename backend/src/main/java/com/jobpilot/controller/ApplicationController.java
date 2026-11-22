@@ -135,6 +135,7 @@ public class ApplicationController {
         workerRequest.put("tailored_resume_base64", Base64.getEncoder().encodeToString(resumeBytes));
         workerRequest.put("tailored_resume_filename", "tailored-resume." + format);
         workerRequest.put("tailored_resume", tailored.getResume() == null ? Map.of() : tailored.getResume());
+        workerRequest.put("job_context", buildJobContext(jobId));
 
         try {
             Map<String, Object> workerResult = workerClient.post()
@@ -201,6 +202,7 @@ public class ApplicationController {
         refreshRequest.put("career_profile", profile.getExtracted());
         refreshRequest.put("tailored_resume",
             tailored == null || tailored.getResume() == null ? Map.of() : tailored.getResume());
+        refreshRequest.put("job_context", buildJobContext(record.getJobId()));
 
         if (request != null && request.get("manualAnswer") instanceof Map<?, ?> supplied) {
             Map<String, Object> manualAnswer = new LinkedHashMap<>();
@@ -276,6 +278,18 @@ public class ApplicationController {
         applyWorkerResult(record, result);
         mongo.save(record);
         return toResponse(record);
+    }
+
+    private Map<String, Object> buildJobContext(String jobId) {
+        JobRecord job = mongo.findById(jobId, JobRecord.class);
+        if (job == null) return Map.of();
+
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("job", job.getJob() == null ? Map.of() : job.getJob());
+        context.put("requirements", job.getRequirements() == null ? Map.of() : job.getRequirements());
+        context.put("visual_inspection",
+            job.getVisualInspection() == null ? Map.of() : job.getVisualInspection());
+        return context;
     }
 
     private Map<String, Object> callWorker(String path, Map<String, Object> body) {
