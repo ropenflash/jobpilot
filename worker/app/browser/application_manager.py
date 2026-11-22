@@ -479,7 +479,7 @@ class ApplicationSessionManager:
                 item["classification"] = _classify_field(custom_label, item.get("name", ""), item.get("type", ""))
 
     async def _apply_candidate_answer(self, session: BrowserSession, manual_answer: dict):
-        """Fill one field with the exact answer the candidate just supplied in the JobPilot UI."""
+        """Validate and apply a candidate-confirmed answer to its current live field."""
         try:
             field_index = int(manual_answer.get("field_index"))
         except (TypeError, ValueError):
@@ -490,56 +490,42 @@ class ApplicationSessionManager:
         if not question or not answer or len(question) > 500 or len(answer) > 5000:
             return
 
+        if not hasattr(session, "answer_decisions"):
+            session.answer_decisions = {}
+        if not hasattr(session, "career_profile"):
+            session.career_profile = {}
+        if not hasattr(session, "tailored_resume"):
+            session.tailored_resume = {}
+
         session.fields = await self._snapshot_fields(session.frame)
+        session.manual_field_labels[field_index] = question
+        self._apply_manual_field_labels(session)
         field = next((item for item in session.fields if int(item.get("index", -1)) == field_index), None)
         if field is None:
             self._add_note(session, "The saved answer could not be attached to the live form because its field is no longer present. Enter it manually in Chromium.")
             return
 
-        input_type = str(field.get("type") or "").lower()
-        session.manual_field_labels[field_index] = question
-        if input_type in {"checkbox", "radio", "file", "button", "hidden"}:
-            session.fields = await self._snapshot_fields(session.frame)
-            self._apply_manual_field_labels(session)
-            self._add_note(session, "This answer was saved to your profile, but this control still requires manual interaction in Chromium.")
-            return
+        options = None
+        if field.get("type") == "select":
+            control = session.frame.locator(FIELD_SELECTOR).nth(field_index)
+            options = await control.locator("option").evaluate_all(
+                "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
+            )
 
-        control = session.frame.locator(FIELD_SELECTOR).nth(field_index)
-        try:
-            if input_type == "select":
-                options = await control.locator("option").evaluate_all(
-                    "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
-                )
-                normalized_answer = re.sub(r"[^a-z0-9]", "", answer.lower())
-                matches = [
-                    option for option in options
-                    if option.get("value") and normalized_answer
-                    and normalized_answer in {
-                        re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
-                        re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
-                    }
-                ]
-                if len(matches) != 1:
-                    self._add_note(session, "The answer is saved to your profile, but the current dropdown has no exact matching option. Please choose it manually in Chromium.")
-                    return
-                await control.select_option(value=matches[0]["value"])
-            elif input_type in {"text", "email", "tel", "url", "textarea", "number", "date"}:
-                if input_type == "number":
-                    numeric = re.search(r"\d+(?:\.\d+)?", answer.replace(",", ""))
-                    if not numeric:
-                        self._add_note(session, "This numeric field needs a plain numeric answer. The saved profile answer was retained for future reference.")
-                        return
-                    answer = numeric.group(0)
-                await control.fill(answer)
-            else:
-                self._add_note(session, "The answer is saved to your profile, but this control type needs manual entry in Chromium.")
-                return
-            session.manual_field_labels[field_index] = question
-            session.fields = await self._snapshot_fields(session.frame)
-            self._apply_manual_field_labels(session)
-            self._add_note(session, f"Applied your saved answer to the current form field: {question}")
-        except Exception:
-            self._add_note(session, "The answer is saved to your profile, but JobPilot could not apply it to the current field. Please enter it manually in Chromium.")
+        applied = await self._decide_and_apply(
+            session,
+            field,
+            answer,
+            "saved_application_answer",
+            options,
+        )
+        if applied:
+            self._add_note(session, f"Applied your candidate-confirmed answer to the current form field: {question}")
+        else:
+            self._add_note(
+                session,
+                "Your answer remains saved in the career profile, but the current field was left unchanged because its evidence or control validation needs review."
+            )
 
     async def _snapshot_fields(self, frame) -> list[dict]:
         rows = await frame.locator(FIELD_SELECTOR).evaluate_all("""elements => elements.map((el, index) => {
@@ -775,6 +761,11 @@ class ApplicationSessionManager:
 
     async def _autofill(self, session: BrowserSession, career_profile: dict) -> int:
         """Fill only answers approved by the evidence-grounded decision engine."""
+        if not hasattr(session, "answer_decisions"):
+            session.answer_decisions = {}
+        if not hasattr(session, "tailored_resume"):
+            session.tailored_resume = {}
+        session.career_profile = career_profile
         values = self._profile_values(career_profile)
         filled_count = 0
         selected_calling_code = await self._select_phone_country_code(session, values.get("phone", ""))
@@ -1003,7 +994,7 @@ class ApplicationSessionManager:
                         review.get("suggested_answer"),
                         "ai_draft",
                         session.career_profile,
-                        session.tailored_resume,
+                        getattr(session, "tailored_resume", {}),
                     )
                     decision_store[field_index] = decision
             if decision is None:
