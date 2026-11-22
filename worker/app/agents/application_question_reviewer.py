@@ -229,6 +229,7 @@ def normalize_review(
                 "but only where those details are accurate."
             )
 
+        needs_profile_update = status in {"partial", "not_found"} and bool(profile_improvement)
         reviews.append({
             "field_index": question["field_index"],
             "question": question["question"],
@@ -238,6 +239,9 @@ def normalize_review(
             "evidence": linked_evidence,
             "suggested_answer": suggested_answer,
             "profile_improvement": profile_improvement,
+            "needs_profile_update": needs_profile_update,
+            "profile_fields_needed": ["experience_or_projects"] if needs_profile_update else [],
+            "answer_basis": "verified profile/resume evidence" if status == "supported" else None,
         })
 
         if profile_improvement:
@@ -338,6 +342,7 @@ async def review_application_questions(
             "profile_improvements": [],
         }
         for question in reviewable:
+            recommendation = "Complete the relevant experience, project, skills or education details in your career profile before answering this question."
             base["reviews"].append({
                 "field_index": question["field_index"],
                 "question": question["question"],
@@ -346,9 +351,20 @@ async def review_application_questions(
                 "reason": "No usable resume/profile evidence was available to support an answer.",
                 "evidence": [],
                 "suggested_answer": None,
-                "profile_improvement": "Complete the relevant experience, project, skills or education details in your career profile before answering this question.",
+                "profile_improvement": recommendation,
+                "needs_profile_update": True,
+                "profile_fields_needed": ["experience_or_projects"],
+                "answer_basis": None,
             })
             base["not_found_count"] += 1
+            base["profile_update_required_count"] += 1
+            base["profile_update_requests"].append({
+                "field_index": question["field_index"],
+                "question": question["question"],
+                "fields_needed": ["experience_or_projects"],
+                "recommendation": recommendation,
+                "priority": "high",
+            })
         return base
 
     ai_evidence = [
@@ -431,13 +447,13 @@ async def review_application_questions(
         ]
         return normalized
     except Exception as exc:
-        fallback_reviews = []
+        by_index = {}
         for question in questions:
             sensitive_match = next(
                 (item for item in sensitive if item["field_index"] == question["field_index"]),
                 None,
             )
-            fallback_reviews.append(sensitive_match or {
+            by_index[question["field_index"]] = sensitive_match or {
                 "field_index": question["field_index"],
                 "question": question["question"],
                 "category": "unknown",
@@ -446,12 +462,18 @@ async def review_application_questions(
                 "evidence": [],
                 "suggested_answer": None,
                 "profile_improvement": None,
-            })
+                "needs_profile_update": False,
+                "profile_fields_needed": [],
+                "answer_basis": None,
+            }
+        # Deterministic profile answers must survive an AI outage.
         for item in structured.values():
-            if item["field_index"] not in {review["field_index"] for review in fallback_reviews}:
-                fallback_reviews.append(item)
+            by_index[item["field_index"]] = item
+        for item in sensitive:
+            by_index[item["field_index"]] = item
+        fallback_reviews = [by_index[question["field_index"]] for question in questions]
         return {
-            "status": "unavailable" if not structured else "completed",
+            "status": "unavailable",
             "questions_reviewed": len(questions),
             "supported_count": sum(item["evidence_status"] == "supported" for item in fallback_reviews),
             "partial_count": sum(item["evidence_status"] == "partial" for item in fallback_reviews),
