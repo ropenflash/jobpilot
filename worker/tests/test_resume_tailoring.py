@@ -6,6 +6,7 @@ from app.agents.resume_tailor import (
     _build_source_map,
     _make_docx,
     _make_pdf,
+    _style_config,
     _validated_content,
 )
 from app.schemas.tailored_resume import (
@@ -117,14 +118,20 @@ class ResumeTailoringTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             _validated_content(draft, self.profile, self.job, self.source_map, self.allowed_skills)
 
-    def test_documents_are_generated_in_expected_formats(self):
+    def test_each_supported_style_generates_both_document_formats(self):
         resume = _validated_content(
             self._draft(), self.profile, self.job, self.source_map, self.allowed_skills
         )
-        docx = _make_docx(resume)
-        pdf = _make_pdf(resume)
-        self.assertTrue(docx.startswith(b"PK"))
-        self.assertTrue(pdf.startswith(b"%PDF"))
+        for style in ("classic", "modern", "compact"):
+            with self.subTest(style=style):
+                docx = _make_docx(resume, style)
+                pdf = _make_pdf(resume, style)
+                self.assertTrue(docx.startswith(b"PK"))
+                self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_unknown_resume_style_is_rejected(self):
+        with self.assertRaises(HTTPException):
+            _style_config("creative")
 
 
 if __name__ == "__main__":
