@@ -71,6 +71,21 @@ async def inspect_greenhouse_job_page(url: str) -> dict:
         page.set_default_navigation_timeout(45000)
         page.set_default_timeout(8000)
 
+        async def guard_main_frame_navigation(route):
+            request = route.request
+            if request.is_navigation_request() and request.frame == page.main_frame:
+                try:
+                    redirected_board, redirected_job_id = parse_greenhouse_job_url(request.url)
+                except Exception:
+                    await route.abort()
+                    return
+                if redirected_board != board_token or redirected_job_id != job_id:
+                    await route.abort()
+                    return
+            await route.continue_()
+
+        # Validate redirects before Chromium is allowed to fetch the new top-level page.
+        await page.route("**/*", guard_main_frame_navigation)
         response = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
         await page.wait_for_timeout(900)
 
