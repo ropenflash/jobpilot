@@ -489,7 +489,7 @@ BLOCKED_REUSE_CLASSIFICATIONS = {
 
 
 def normalize_application_question(value: str) -> str:
-    return re.sub(r"\\s+", " ", re.sub(r"[^a-z0-9]+", " ", _clean(value).lower())).strip()
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", _clean(value).lower())).strip()
 
 
 def resolve_saved_application_answer(question: dict, profile: dict) -> dict | None:
