@@ -30,17 +30,17 @@ def _match_country_code_option(options: list[dict], phone: str) -> dict | None:
     if not phone.strip().startswith("+"):
         return None
 
-    phone_digits = re.sub(r"\\D", "", phone)
+    phone_digits = re.sub(r"\D", "", phone)
     matches = []
     for index, option in enumerate(options):
         value = str(option.get("value") or "").strip()
         label = str(option.get("text") or "").strip()
 
-        code_match = re.fullmatch(r"\\+?(\\d{1,3})", value)
+        code_match = re.fullmatch(r"\+?(\d{1,3})", value)
         if code_match is None:
-            code_match = re.search(r"\\+\\s*(\\d{1,3})\\b", label)
-        if code_match is None and re.fullmatch(r"\\+?\\d{1,3}", label):
-            code_match = re.fullmatch(r"\\+?(\\d{1,3})", label)
+            code_match = re.search(r"\+\s*(\d{1,3})\b", label)
+        if code_match is None and re.fullmatch(r"\+?\d{1,3}", label):
+            code_match = re.fullmatch(r"\+?(\d{1,3})", label)
         if code_match is None:
             continue
 
@@ -60,7 +60,7 @@ def _match_country_code_option(options: list[dict], phone: str) -> dict | None:
 
 
 def _national_number(phone: str, calling_code: str) -> str:
-    digits = re.sub(r"\\D", "", phone)
+    digits = re.sub(r"\D", "", phone)
     if phone.strip().startswith("+") and digits.startswith(calling_code):
         return digits[len(calling_code):]
     return phone.strip()
