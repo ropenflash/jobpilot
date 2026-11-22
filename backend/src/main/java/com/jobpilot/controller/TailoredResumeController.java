@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -59,7 +60,17 @@ public class TailoredResumeController {
     }
 
     @PostMapping("/jobs/{jobId}/tailored-resumes")
-    public Map<String, Object> generate(@PathVariable String jobId) {
+    public Map<String, Object> generate(
+            @PathVariable String jobId,
+            @RequestBody(required = false) Map<String, Object> request) {
+        String style = request == null ? "classic"
+            : String.valueOf(request.getOrDefault("style", "classic")).toLowerCase(Locale.ROOT);
+        if (!Set.of("classic", "modern", "compact").contains(style)) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Resume style must be classic, modern or compact."
+            );
+        }
         JobRecord job = mongo.findById(jobId, JobRecord.class);
         if (job == null || job.getJob() == null) {
             throw new ResponseStatusException(
@@ -86,6 +97,7 @@ public class TailoredResumeController {
         workerRequest.put("requirements", job.getRequirements() == null ? Map.of() : job.getRequirements());
         workerRequest.put("match", job.getMatch() == null ? Map.of() : job.getMatch());
         workerRequest.put("career_profile", careerFacts);
+        workerRequest.put("style", style);
 
         Map<String, Object> result;
         try {
@@ -160,6 +172,7 @@ public class TailoredResumeController {
         record.setJobId(jobId);
         record.setJobTitle(String.valueOf(job.getJob().getOrDefault("title", "Target role")));
         record.setCompany(String.valueOf(job.getJob().getOrDefault("company", "")));
+        record.setResumeStyle(style);
         record.setProfileResumeId(profile.getResumeId());
         record.setProfileUpdatedAt(profile.getUpdatedAt());
         record.setResume(resume);
@@ -288,6 +301,7 @@ public class TailoredResumeController {
         response.put("jobId", record.getJobId());
         response.put("jobTitle", record.getJobTitle());
         response.put("company", record.getCompany());
+        response.put("resumeStyle", record.getResumeStyle() == null ? "classic" : record.getResumeStyle());
         response.put("profileResumeId", record.getProfileResumeId());
         response.put("profileUpdatedAt", record.getProfileUpdatedAt());
         response.put("resume", record.getResume());
