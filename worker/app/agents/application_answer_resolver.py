@@ -201,6 +201,7 @@ def _make_result(
     answer_basis: str | None = None,
 ) -> dict:
     missing_fields = list(dict.fromkeys(missing_fields or []))
+    required_missing_fields = missing_fields if question.get("required", True) else []
     return {
         "field_index": question["field_index"],
         "question": question["question"],
@@ -210,8 +211,8 @@ def _make_result(
         "evidence": _profile_evidence(evidence_refs or [], evidence or []),
         "suggested_answer": answer,
         "profile_improvement": profile_improvement,
-        "needs_profile_update": bool(missing_fields),
-        "profile_fields_needed": missing_fields,
+        "needs_profile_update": bool(required_missing_fields),
+        "profile_fields_needed": required_missing_fields,
         "answer_basis": answer_basis,
     }
 
