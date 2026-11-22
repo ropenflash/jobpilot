@@ -433,6 +433,20 @@ def _validate_control_answer(field: dict, answer: str, options: list[dict] | Non
                     return None, None, "The answer does not match the field's required format."
             except re.error:
                 return None, None, "The field has a format rule JobPilot cannot safely validate."
+    if input_type in SAFE_TEXT_TYPES:
+        minimum_length = field.get("minLength")
+        maximum_length = field.get("maxLength")
+        if minimum_length is not None and len(answer) < int(minimum_length):
+            return None, None, f"The answer is shorter than the field minimum length ({minimum_length})."
+        if maximum_length is not None and len(answer) > int(maximum_length):
+            return None, None, f"The answer exceeds the field maximum length ({maximum_length})."
+        pattern = _clean(field.get("pattern"))
+        if pattern:
+            try:
+                if re.fullmatch(pattern, answer) is None:
+                    return None, None, "The answer does not match the field's required format."
+            except re.error:
+                return None, None, "The field has a format rule JobPilot cannot safely validate."
     return answer, None, None
 
 
