@@ -156,6 +156,7 @@ async def tailor_resume_endpoint(request: TailoredResumeRequest):
         requirements=request.requirements,
         match=request.match,
         profile=request.career_profile,
+        style=request.style,
     )
 
 def _application_error(exc: ApplicationAutomationError):
