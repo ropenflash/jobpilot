@@ -91,7 +91,7 @@ def build_job_context(raw_context: dict | None) -> dict:
     """Whitelist and bound the job data used to interpret question intent."""
     raw = raw_context or {}
     job = raw.get("job") if isinstance(raw.get("job"), dict) else raw
-    requirements = raw.get("requirements") if isinstance(raw.get("requirements"), dict) else {}
+    requirements = raw.get("requirements") if isinstance(raw.get("requirements"), dict) else raw
 
     def list_value(key: str) -> list[str]:
         value = requirements.get(key) or []
@@ -99,7 +99,7 @@ def build_job_context(raw_context: dict | None) -> dict:
             value = [value]
         return [_clean(item)[:300] for item in value if _clean(item)][:MAX_CONTEXT_LIST_ITEMS]
 
-    description = _clean(job.get("description"))[:MAX_JOB_DESCRIPTION_CHARS]
+    description = _clean(job.get("description") or job.get("description_excerpt"))[:MAX_JOB_DESCRIPTION_CHARS]
     visual = raw.get("visual_inspection") if isinstance(raw.get("visual_inspection"), dict) else {}
     findings = visual.get("findings") or []
     if isinstance(findings, str):
@@ -109,13 +109,13 @@ def build_job_context(raw_context: dict | None) -> dict:
         "title": _clean(job.get("title"))[:240],
         "company": _clean(job.get("company"))[:180],
         "location": _clean(job.get("location"))[:180],
-        "summary": _clean(requirements.get("summary"))[:1200],
+        "summary": _clean(requirements.get("summary") or job.get("summary"))[:1200],
         "responsibilities": list_value("responsibilities"),
         "required_skills": list_value("required_skills"),
         "preferred_skills": list_value("preferred_skills"),
         "qualifications": list_value("qualifications"),
-        "employment_type": _clean(requirements.get("employment_type"))[:120],
-        "salary_range": _clean(requirements.get("salary_range"))[:120],
+        "employment_type": _clean(requirements.get("employment_type") or job.get("employment_type"))[:120],
+        "salary_range": _clean(requirements.get("salary_range") or job.get("salary_range"))[:120],
         "description_excerpt": description,
         "visual_findings": [_clean(item)[:300] for item in findings if _clean(item)][:8],
     }
