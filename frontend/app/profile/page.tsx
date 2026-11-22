@@ -101,6 +101,136 @@ export default function ProfilePage() {
         {message && <p className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">{message}</p>}
 
         {profile && <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+          <div>
+            <h2 className="text-lg font-semibold">Application-specific details</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Add these details once so JobPilot can answer common employer questions. Values are only used after you save and verify this profile.
+            </p>
+          </div>
+
+          <div className="mt-5">
+            <h3 className="text-sm font-semibold text-slate-200">Technology experience</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Enter your actual years for each technology. JobPilot can also estimate a duration from dated roles when the resume explicitly mentions that technology.
+            </p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              {([
+                ["java_experience_years", "Java (years)"],
+                ["spring_boot_experience_years", "Spring Boot (years)"],
+                ["microservices_experience_years", "Microservices (years)"],
+                ["kafka_experience_years", "Kafka (years)"],
+                ["gcp_experience_years", "Google Cloud / GCP (years)"],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="text-sm text-slate-400">
+                  {label}
+                  <input
+                    type="number"
+                    min="0"
+                    max="60"
+                    step="0.5"
+                    value={profile[key] ?? ""}
+                    onChange={event => update(key, event.target.value)}
+                    placeholder="e.g. 5"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6 border-t border-white/10 pt-5">
+            <h3 className="text-sm font-semibold text-slate-200">Notice period and joining</h3>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm text-slate-400">
+                Official notice period
+                <input
+                  value={profile.official_notice_period ?? ""}
+                  onChange={event => update("official_notice_period", event.target.value)}
+                  placeholder="e.g. 60 days"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                />
+              </label>
+              <label className="text-sm text-slate-400">
+                Are you currently serving notice?
+                <select
+                  value={profile.currently_serving_notice ?? ""}
+                  onChange={event => update("currently_serving_notice", event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                >
+                  <option value="">Please select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label className="text-sm text-slate-400">
+                Official last working day (only when serving notice)
+                <input
+                  type="date"
+                  value={profile.official_last_working_day ?? ""}
+                  onChange={event => update("official_last_working_day", event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                />
+              </label>
+              <label className="text-sm text-slate-400">
+                Earliest confirmed joining availability
+                <input
+                  value={profile.join_availability ?? ""}
+                  onChange={event => update("join_availability", event.target.value)}
+                  placeholder="e.g. Immediately / 30 days after offer"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-6 border-t border-white/10 pt-5">
+            <h3 className="text-sm font-semibold text-slate-200">Compensation</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              These are private candidate-provided values. JobPilot will not estimate compensation from your resume.
+            </p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm text-slate-400">
+                Current annual CTC (LPA)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={profile.current_ctc_lpa ?? ""}
+                  onChange={event => update("current_ctc_lpa", event.target.value)}
+                  placeholder="e.g. 45"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                />
+              </label>
+              <label className="text-sm text-slate-400">
+                Expected annual CTC (LPA)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={profile.expected_ctc_lpa ?? ""}
+                  onChange={event => update("expected_ctc_lpa", event.target.value)}
+                  placeholder="e.g. 60"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                />
+              </label>
+              <label className="text-sm text-slate-400">
+                CTC currency
+                <select
+                  value={profile.ctc_currency ?? "INR"}
+                  onChange={event => update("ctc_currency", event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-300"
+                >
+                  <option value="INR">INR</option>
+                  <option value="USD">USD</option>
+                  <option value="GBP">GBP</option>
+                  <option value="EUR">EUR</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </section>}
+
+        {profile && <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Extracted information</h2>
             <span className={`rounded-full px-3 py-1 text-xs ${verified ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>
