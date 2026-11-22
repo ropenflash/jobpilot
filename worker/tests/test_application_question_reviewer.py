@@ -121,6 +121,46 @@ class ApplicationQuestionReviewerTests(unittest.TestCase):
 
 
 class ApplicationQuestionSensitiveGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_saved_private_application_answers_are_excluded_from_ai_prompt(self):
+        fields = [{
+            "index": 0,
+            "label": "Describe a technical project you led.",
+            "type": "textarea",
+            "required": True,
+            "classification": "manual",
+            "filled": False,
+        }]
+        profile = {
+            "application_answers": [{
+                "question": "What is your current CTC?",
+                "normalized_question": "what is your current ctc",
+                "answer": "INR 47 LPA PRIVATE_VALUE",
+                "classification": "current_ctc",
+                "candidate_confirmed": True,
+            }]
+        }
+        model_result = (
+            '{"reviews":[{"field_index":0,"category":"technical_experience",'
+            '"evidence_status":"not_found","reason":"No matching project detail.",'
+            '"evidence_refs":[],"suggested_answer":null,'
+            '"profile_improvement":"Add an accurate project example."}],'
+            '"profile_improvements":[]}'
+        )
+        with patch(
+            "app.agents.application_question_reviewer.generate_text",
+            new_callable=AsyncMock,
+            return_value=model_result,
+        ) as generate:
+            await review_application_questions(
+                fields,
+                profile,
+                {"summary": "Backend engineer with distributed systems experience."},
+            )
+
+        prompt_messages = generate.call_args.args[0]
+        self.assertNotIn("PRIVATE_VALUE", prompt_messages[1]["content"])
+        self.assertIn("Backend engineer", prompt_messages[1]["content"])
+
     async def test_sensitive_consent_questions_are_not_sent_to_ai_for_answering(self):
         fields = [{
             "index": 10,
