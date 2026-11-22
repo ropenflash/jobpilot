@@ -8,9 +8,6 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
 .venv/
 venv/
 ENV/
@@ -20,7 +17,7 @@ ENV/
 .coverage
 htmlcov/
 
-# Node.js / Next.js
+# Node / Next.js
 node_modules/
 .next/
 out/
@@ -35,31 +32,28 @@ target/
 *.class
 *.jar
 *.war
-.mvn/wrapper/maven-wrapper.jar
 
-# IDE
+# IDE and OS
 .idea/
 .vscode/
 *.iml
 .DS_Store
 
-# Logs
+# Logs and temporary files
 *.log
 logs/
+tmp/
+temp/
+*.tmp
 
-# Database
+# Local database files
 data/
 mongodb/
 *.sqlite
 *.db
 
-# Uploaded resumes and generated documents
+# Personal resume data and generated documents
 storage/resumes/*
 storage/tailored/*
 !storage/resumes/.gitkeep
 !storage/tailored/.gitkeep
-
-# Temporary files
-tmp/
-temp/
-*.tmp

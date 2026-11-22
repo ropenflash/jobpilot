@@ -1,5 +1,6 @@
 
 import os
+
 import httpx
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -9,7 +10,11 @@ class OpenRouterError(RuntimeError):
     pass
 
 
-async def chat_completion(messages: list[dict], model: str | None = None) -> dict:
+async def chat_completion(
+    messages: list[dict],
+    model: str | None = None,
+    response_format: dict | None = None,
+) -> dict:
     api_key = os.getenv("OPENROUTER_API_KEY")
 
     if not api_key:
@@ -22,10 +27,10 @@ async def chat_completion(messages: list[dict], model: str | None = None) -> dic
             "OPENROUTER_MODEL", "openai/gpt-4o"
         ),
         "messages": messages,
-        "max_tokens": int(
-            os.getenv("OPENROUTER_MAX_TOKENS", "3000")
-        ),
+        "max_tokens": int(os.getenv("OPENROUTER_MAX_TOKENS", "3000")),
     }
+    if response_format:
+        payload["response_format"] = response_format
 
     headers = {
         "Authorization": f"Bearer {api_key}",
