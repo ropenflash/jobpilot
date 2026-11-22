@@ -170,7 +170,8 @@ async def prepare_application(request: PrepareApplicationRequest):
             application_id=request.application_id,
             job_url=str(request.job_url),
             career_profile=request.career_profile,
-            resume_pdf_base64=request.tailored_resume_pdf_base64,
+            resume_base64=request.tailored_resume_base64,
+            resume_filename=request.tailored_resume_filename,
         )
     except ApplicationAutomationError as exc:
         raise _application_error(exc) from exc
