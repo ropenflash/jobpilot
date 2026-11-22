@@ -7,6 +7,7 @@ candidate-confirmed saved answer, survive conflict checks, and fit the live cont
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from datetime import date
 from urllib.parse import urlparse
 from typing import Any
@@ -150,7 +151,11 @@ def _same_value(candidate: str, source_value: str) -> bool:
     right = _normalize(source_value)
     if not left or not right:
         return False
-    if left == right or left in right or right in left:
+    if left == right:
+        return True
+    if left.isdigit() and right.isdigit():
+        return len(left) >= 6 and right.endswith(left)
+    if left in right or right in left:
         return True
     left_number = _number(candidate)
     right_number = _number(source_value)
@@ -168,6 +173,15 @@ def _profile_supports(
         {"source": "verified_profile", **entry}
         for entry in entries if _path_matches(entry["path"], aliases)
     ]
+    if classification == "phone_country_code":
+        digits = re.sub(r"\\D", "", candidate)
+        for entry in related:
+            phone_digits = re.sub(r"\\D", "", entry["detail"])
+            if digits and phone_digits.startswith(digits):
+                return True, [entry]
+    if classification == "last_working_day" and _normalize(candidate) == "notcurrentlyservingnotice":
+        if any(_normalize(entry["detail"]) in {"no", "false", "0", "notserving"} for entry in related):
+            return True, related
     matching = [
         item for item in related
         if _same_value(candidate, item["detail"])
@@ -213,12 +227,28 @@ def _profile_supports(
     return False, related
 
 
-def _saved_answer_supports(candidate: str, profile: dict | None) -> tuple[bool, list[dict]]:
+def _saved_answer_supports(
+    candidate: str,
+    profile: dict | None,
+    classification: str,
+    question: str,
+) -> tuple[bool, list[dict]]:
+    normalized_question = _normalize(question)
     for item in (profile or {}).get("application_answers") or []:
         if not isinstance(item, dict) or item.get("candidate_confirmed") is not True:
             continue
         answer = _clean(item.get("answer"))
-        if answer and _same_value(candidate, answer):
+        item_classification = _clean(item.get("classification"))
+        saved_question = _normalize(item.get("normalized_question") or item.get("question"))
+        same_category = bool(classification and item_classification == classification and classification != "manual")
+        same_question = bool(
+            normalized_question and saved_question
+            and (
+                normalized_question == saved_question
+                or SequenceMatcher(None, normalized_question, saved_question).ratio() >= 0.93
+            )
+        )
+        if answer and _same_value(candidate, answer) and (same_category or same_question):
             return True, [{
                 "source": "saved_application_answer",
                 "path": item.get("question") or "application_answers",
@@ -400,7 +430,7 @@ def decide_application_answer(
         return result("candidate_confirmation", "AI-generated text is a draft only and cannot be entered automatically.")
 
     if answer_source == "saved_application_answer":
-        supported, evidence = _saved_answer_supports(candidate, career_profile)
+        supported, evidence = _saved_answer_supports(candidate, career_profile, classification, question)
     elif answer_source == "verified_profile":
         supported, evidence = _profile_supports(classification, candidate, career_profile)
     else:
