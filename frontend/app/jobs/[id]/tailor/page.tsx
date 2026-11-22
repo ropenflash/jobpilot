@@ -520,6 +520,7 @@ export default function TailorResumePage() {
                 Review before sending. AI wording can still overstate a source fact even when it includes a reference.
                 Check every claim, metric and skill against your actual experience.
               </p>
+            </section>
 
           </>
         )}
