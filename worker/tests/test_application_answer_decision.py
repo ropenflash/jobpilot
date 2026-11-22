@@ -124,6 +124,62 @@ class ApplicationAnswerDecisionTests(unittest.TestCase):
         )
         self.assertEqual(number["action"], "manual_review")
 
+
+    def test_candidate_supported_ai_draft_stays_review_only(self):
+        decision = decide_application_answer(
+            self._field(label="Why this role?", classification="manual", type="textarea"),
+            "An evidence-backed draft.",
+            "ai_draft",
+            {"application_answers": []},
+            {},
+        )
+        self.assertEqual(decision["action"], "candidate_confirmation")
+        self.assertIsNone(decision["answer"])
+
+    def test_combined_spring_and_microservices_tenure_does_not_create_false_conflicts(self):
+        profile = {
+            "spring_boot_experience_years": 6,
+            "microservices_experience_years": 5,
+        }
+        resume = {
+            "resume": {
+                "spring_boot_experience_years": 6,
+                "microservices_experience_years": 5,
+            }
+        }
+        decision = decide_application_answer(
+            self._field(
+                label="Spring Boot and microservices experience",
+                classification="years_spring_boot_microservices",
+                type="text",
+            ),
+            "Spring Boot: 6 years; Microservices: 5 years",
+            "verified_profile",
+            profile,
+            resume,
+        )
+        self.assertEqual(decision["action"], "autofill")
+
+    def test_phone_country_code_must_be_supported_by_verified_phone_number(self):
+        field = self._field(label="Country code", classification="phone_country_code", type="select")
+        decision = decide_application_answer(
+            field, "+91", "verified_profile",
+            {"phone": "+91 9876543210"}, {},
+            [{"value": "+91", "text": "+91"}],
+        )
+        self.assertEqual(decision["action"], "autofill")
+        self.assertEqual(decision["answer"], "+91")
+
+    def test_not_serving_notice_can_support_conditional_lwd_answer(self):
+        decision = decide_application_answer(
+            self._field(label="Last working day", classification="last_working_day", type="text"),
+            "Not currently serving notice.",
+            "verified_profile",
+            {"currently_serving_notice": "no"},
+            {},
+        )
+        self.assertEqual(decision["action"], "autofill")
+
     def test_invalid_date_and_url_are_not_filled(self):
         date_decision = decide_application_answer(
             self._field(label="Last working day", classification="last_working_day", type="date"),
