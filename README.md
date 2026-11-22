@@ -8,7 +8,7 @@ A human-in-the-loop job application copilot.
 - Gemini on Vertex AI for model inference
 - Greenhouse Job Board API for public job-post retrieval
 - DOCX/PDF resume generation for job-specific tailoring
-- Playwright browser automation is planned; this milestone does not submit applications.
+- Playwright headless browser inspection of rendered Greenhouse job pages, plus human-in-the-loop application automation.
 
 **Safety boundary:** JobPilot prepares and reviews application materials. No job application is submitted without explicit user confirmation in a later milestone. Never put credentials or secrets in prompts or source control.
 
@@ -46,6 +46,8 @@ export VERTEX_MODEL="gemini-3.8-flash"
 export VERTEX_MAX_TOKENS=3000
 export VERTEX_JOB_MAX_OUTPUT_TOKENS=4096
 export VERTEX_RESUME_MAX_OUTPUT_TOKENS=5000
+export JOBPILOT_JOB_VISUAL_INSPECTION_ENABLED=true
+export JOBPILOT_JOB_SCREENSHOT_COUNT=4
 
 python -m uvicorn app.main:app --reload --port 8000
 \`\`\`
@@ -103,9 +105,9 @@ Scanned/image-only PDFs are not supported yet; OCR is a future enhancement. AI e
 2. Open http://localhost:3000/jobs.
 3. Paste a public job URL with this format: \`https://boards.greenhouse.io/{board_token}/jobs/{job_id}\`. The alternate \`job-boards.greenhouse.io\` host is also accepted.
 4. Spring Boot checks that the verified career profile exists and sends the URL plus profile facts (excluding contact identifiers) to the Python worker.
-5. The worker validates the exact Greenhouse host and URL path, then calls the public Greenhouse Job Board API with \`content=true\`.
-6. The worker converts the returned HTML description into plain text and asks Gemini to extract role requirements and compare them with the career profile.
-7. The worker returns requirement-level evidence. The application calculates a deterministic score: required skills 40%, experience/responsibilities 30%, project evidence 20%, and preferred skills 10%. Categories absent from the comparison are excluded and the remaining weights are normalized to total 100%.
+5. The worker validates the exact Greenhouse host and URL path, calls the public Greenhouse Job Board API with content=true, and opens the same posting in headless Chromium to capture up to four overlapping viewport screenshots.
+6. The worker sends the API description, rendered-page headings/text and screenshots to Gemini on Vertex AI in one multimodal request. Gemini extracts role requirements, compares them with the career profile and returns additional job-relevant visual findings. Screenshots are held in memory for the request and are not saved to disk.
+7. The worker returns requirement-level evidence plus visual-inspection status, screenshot count and visual findings. If Chromium is unavailable, JobPilot records that visual inspection was unavailable and continues with API text only. The application calculates a deterministic score: required skills 40%, experience/responsibilities 30%, project evidence 20%, and preferred skills 10%. Categories absent from the comparison are excluded and the remaining weights are normalized to total 100%.
 8. Spring Boot saves the job, requirements, score and evidence in MongoDB's \`jobs\` collection. The same Greenhouse board token and job ID update the existing record rather than creating duplicates.
 9. Review the score breakdown, matched evidence and gaps in the Jobs page. The score is a profile-evidence estimate, not a prediction of hiring success.
 
