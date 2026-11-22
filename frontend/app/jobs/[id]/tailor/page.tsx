@@ -182,7 +182,10 @@ export default function TailorResumePage() {
         setJob(jobData);
         setMasterProfile(sourceProfile);
         setRecords(history);
-        if (history.length) setSelected(history[0]);
+        if (history.length) {
+          setSelected(history[0]);
+          setSelectedStyle(history[0].resumeStyle ?? "classic");
+        }
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : "Could not load this job.");
       } finally {
@@ -289,6 +292,27 @@ export default function TailorResumePage() {
                   )} />
                 </span>
                 <span className="mt-2 block text-xs leading-5 text-slate-400">{option.description}</span>
+                <span className={"mt-4 block rounded-lg border p-3 " + (
+                  option.value === "modern" ? "border-blue-300/20 bg-slate-950/80 text-left" :
+                  option.value === "compact" ? "border-slate-400/20 bg-slate-950/90 text-center" :
+                  "border-cyan-300/20 bg-slate-950/70 text-center"
+                )}>
+                  <span className={"block text-[11px] font-bold " + (
+                    option.value === "modern" ? "text-blue-300" :
+                    option.value === "compact" ? "text-slate-100" : "text-cyan-200"
+                  )}>YOUR NAME</span>
+                  <span className="mt-1 block text-[7px] text-slate-400">Role-aligned headline · email · phone</span>
+                  <span className={"mt-3 block h-px " + (
+                    option.value === "modern" ? "bg-blue-400/60" :
+                    option.value === "compact" ? "bg-slate-400/50" : "bg-cyan-400/60"
+                  )} />
+                  <span className="mt-2 block text-left text-[7px] font-bold tracking-wider text-slate-300">PROFESSIONAL SUMMARY</span>
+                  <span className="mt-1 block h-1 w-full rounded bg-slate-500/50" />
+                  <span className="mt-1 block h-1 w-4/5 rounded bg-slate-500/40" />
+                  <span className="mt-2 block text-left text-[7px] font-bold tracking-wider text-slate-300">EXPERIENCE</span>
+                  <span className="mt-1 block h-1 w-full rounded bg-slate-500/50" />
+                  <span className="mt-1 block h-1 w-11/12 rounded bg-slate-500/40" />
+                </span>
               </button>
             ))}
           </div>
