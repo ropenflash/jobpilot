@@ -12,10 +12,10 @@ from docx.shared import Inches, Pt, RGBColor
 from fastapi import HTTPException
 from pydantic import ValidationError
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
+from reportlab.lib.units import inch, mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from app.schemas.tailored_resume import TailoredResumeDraft
@@ -559,14 +559,14 @@ def _make_docx(resume: dict, style: str = "classic") -> bytes:
 def _make_pdf(resume: dict, style: str = "classic") -> bytes:
     _, preset = _style_config(style)
     output = BytesIO()
-    side_margin = preset["margin_side"] * 25.4 * mm / 25.4
+    side_margin = preset["margin_side"] * inch
     document = SimpleDocTemplate(
         output,
         pagesize=A4,
         rightMargin=side_margin,
         leftMargin=side_margin,
-        topMargin=preset["margin_top"] * 25.4 * mm / 25.4,
-        bottomMargin=preset["margin_bottom"] * 25.4 * mm / 25.4,
+        topMargin=preset["margin_top"] * inch,
+        bottomMargin=preset["margin_bottom"] * inch,
         title=(resume.get("full_name") or "Candidate") + " - " + (resume.get("target_title") or "Resume"),
         author=resume.get("full_name") or "JobPilot",
     )
