@@ -137,6 +137,32 @@ class ApplicationAutomationTests(unittest.TestCase):
         self.assertEqual(approximate["experience_years"], 11.0)
         self.assertEqual(values["linkedin"], "https://www.linkedin.com/in/example")
 
+    def test_profile_values_prepare_the_new_application_answer_fields(self):
+        values = ApplicationSessionManager()._profile_values({
+            "java_experience_years": 8,
+            "spring_boot_experience_years": 6,
+            "microservices_experience_years": 5,
+            "kafka_experience_years": 4,
+            "gcp_experience_years": 3,
+            "official_notice_period": "60 days",
+            "currently_serving_notice": "yes",
+            "official_last_working_day": "2026-12-31",
+            "join_availability": "From 2027-01-01",
+            "current_ctc_lpa": 47,
+            "expected_ctc_lpa": 65,
+            "ctc_currency": "INR",
+        })
+        self.assertEqual(values["years_java"], "8")
+        self.assertEqual(values["years_spring_boot_microservices"], "Spring Boot: 6 years; Microservices: 5 years")
+        self.assertEqual(values["years_kafka"], "4")
+        self.assertEqual(values["years_gcp"], "3")
+        self.assertIn("Official notice period: 60 days", values["notice_period_answer"])
+        self.assertIn("Official last working day: 2026-12-31", values["notice_period_answer"])
+        self.assertEqual(values["last_working_day"], "2026-12-31")
+        self.assertEqual(values["join_availability"], "From 2027-01-01")
+        self.assertEqual(values["current_ctc"], "INR 47 LPA")
+        self.assertEqual(values["expected_ctc_numeric"], "65")
+
     def test_does_not_guess_country_code_from_local_number(self):
         options = [{"value": "+91", "text": "India (+91)"}]
         self.assertIsNone(_match_country_code_option(options, "9876543210"))
