@@ -44,9 +44,20 @@ type QuestionEvidence = {
   detail: string;
 };
 
+type AnswerDecision = {
+  action: "autofill" | "ask_candidate" | "manual_review" | "preserve_existing" | "candidate_confirmation";
+  answer_source?: string;
+  confidence?: number;
+  reason: string;
+  evidence?: QuestionEvidence[];
+  conflicts?: QuestionEvidence[];
+  applied?: boolean;
+};
+
 type QuestionReviewItem = {
   field_index: number;
   question: string;
+  decision?: AnswerDecision;
   category: string;
   evidence_status: "supported" | "partial" | "not_found" | "manual_review" | "not_reviewed";
   reason: string;
@@ -616,6 +627,34 @@ export default function ApplyPage() {
                         </span>
                       </div>
                       {review.reason && <p className="mt-2 text-sm leading-6 text-slate-300">{review.reason}</p>}
+                      {review.decision && (
+                        <div className="mt-3 rounded-lg border border-cyan-300/15 bg-cyan-300/[0.045] p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-cyan-100">
+                              Agent decision · {review.decision.action.replaceAll("_", " ")}
+                            </div>
+                            {review.decision.applied && (
+                              <span className="text-[11px] font-medium text-emerald-200">Applied in Chromium</span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm leading-6 text-slate-300">{review.decision.reason}</p>
+                          {review.decision.answer_source && review.decision.answer_source !== "none" && (
+                            <p className="mt-2 text-[11px] text-slate-400">
+                              Source: {review.decision.answer_source.replaceAll("_", " ")}
+                            </p>
+                          )}
+                          {!!review.decision.conflicts?.length && (
+                            <div className="mt-2 rounded-md border border-amber-300/20 bg-amber-300/[0.05] p-2">
+                              <div className="text-xs font-semibold text-amber-200">Conflicting resume evidence</div>
+                              {review.decision.conflicts.map((conflict, index) => (
+                                <p key={conflict.path + index} className="mt-1 text-xs leading-5 text-slate-300">
+                                  {conflict.path}: {conflict.detail}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {review.saved_profile_answer && (
                         <p className="mt-2 text-xs font-medium text-emerald-200">
                           Reused an answer you previously saved in your career profile.
