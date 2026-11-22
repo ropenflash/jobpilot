@@ -237,7 +237,11 @@ def normalize_review(
         if not isinstance(evidence_refs, list):
             evidence_refs = []
         retrieval_context = (retrieval_contexts or {}).get(question["field_index"], {})
-        allowed_refs = set(retrieval_context.get("evidence_ids", []))
+        allowed_refs = (
+            set(retrieval_context.get("evidence_ids", []))
+            if retrieval_contexts is not None
+            else set(evidence_by_id)
+        )
         valid_refs = []
         for ref in evidence_refs:
             ref = _clean(ref)
