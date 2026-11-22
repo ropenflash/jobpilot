@@ -494,7 +494,10 @@ class ApplicationSessionManager:
             return
 
         input_type = str(field.get("type") or "").lower()
+        session.manual_field_labels[field_index] = question
         if input_type in {"checkbox", "radio", "file", "button", "hidden"}:
+            session.fields = await self._snapshot_fields(session.frame)
+            self._apply_manual_field_labels(session)
             self._add_note(session, "This answer was saved to your profile, but this control still requires manual interaction in Chromium.")
             return
 
