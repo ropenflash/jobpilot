@@ -195,7 +195,7 @@ class ApplicationAnswerRagIntegrationTests(unittest.IsolatedAsyncioTestCase):
         review = result["reviews"][0]
         self.assertEqual(review["evidence_status"], "supported")
         self.assertEqual(review["evidence"][0]["source"], "original_resume")
-        self.assertIn("Original resume", review["evidence"][0]["path"])
+        self.assertEqual(review["evidence"][0]["path"], "pdf_text")
         self.assertIn("original_resume", review["retrieval"]["sources"])
 
     async def test_job_requirements_alone_never_become_candidate_evidence(self):
