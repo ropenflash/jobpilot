@@ -19,3 +19,4 @@ management:
 jobpilot:
   worker-url: ${WORKER_URL:http://localhost:8000}
   storage-dir: ${JOBPILOT_STORAGE_DIR:../storage/resumes}
+  tailored-dir: ${JOBPILOT_TAILORED_DIR:../storage/tailored}

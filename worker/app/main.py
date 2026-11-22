@@ -8,8 +8,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
 from app.agents.job_analyzer import analyze_and_match
+from app.agents.resume_tailor import tailor_resume
 from app.schemas.job import JobAnalysisResponse
 from app.schemas.resume import ResumeProfile
+from app.schemas.tailored_resume import TailoredResumeRequest
 from app.services.greenhouse import fetch_greenhouse_job
 from app.services.vertex_client import (
     VertexError,
@@ -24,8 +26,8 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 app = FastAPI(
     title="JobPilot Worker",
-    version="0.4.0",
-    description="AI resume extraction and Greenhouse job analysis worker using Vertex AI."
+    version="0.5.0",
+    description="AI resume extraction, Greenhouse job analysis and resume tailoring worker using Vertex AI."
 )
 
 
@@ -143,3 +145,13 @@ async def parse_resume(file: UploadFile = File(...)):
 async def analyze_job(request: AnalyzeJobRequest):
     job_data = await fetch_greenhouse_job(str(request.url))
     return await analyze_and_match(job_data, request.career_profile)
+
+
+@app.post("/resumes/tailor")
+async def tailor_resume_endpoint(request: TailoredResumeRequest):
+    return await tailor_resume(
+        job=request.job,
+        requirements=request.requirements,
+        match=request.match,
+        profile=request.career_profile,
+    )
