@@ -11,9 +11,12 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.multipart.MultipartFile;
@@ -51,9 +54,11 @@ public class ResumeController {
         String id = UUID.randomUUID().toString();
         String safeName = id + ".pdf";
         Path destination = resumeDirectory.resolve(safeName);
+        byte[] bytes;
         try {
+            bytes = file.getBytes();
             Files.createDirectories(resumeDirectory);
-            Files.write(destination, file.getBytes());
+            Files.write(destination, bytes);
         } catch (IOException ex) {
             throw new ResponseStatusException(
                 HttpStatus.INTERNAL_SERVER_ERROR, "Could not store resume.");
@@ -61,23 +66,47 @@ public class ResumeController {
 
         Map extracted;
         try {
-            MultipartBodyBuilder body = new MultipartBodyBuilder();
-            byte[] bytes = file.getBytes();
-            body.part("file", new ByteArrayResource(bytes) {
-                @Override public String getFilename() { return safeName; }
-            }).contentType(MediaType.APPLICATION_PDF);
+            // Spring MVC's standard multipart message converter handles this.
+            // MultipartBodyBuilder is a WebFlux type and can require Reactive Streams.
+            HttpHeaders partHeaders = new HttpHeaders();
+            partHeaders.setContentType(MediaType.APPLICATION_PDF);
+            ByteArrayResource pdfResource = new ByteArrayResource(bytes) {
+                @Override
+                public String getFilename() {
+                    return safeName;
+                }
+            };
+            HttpEntity<ByteArrayResource> filePart =
+                new HttpEntity<>(pdfResource, partHeaders);
+
+            MultiValueMap<String, Object> multipart = new LinkedMultiValueMap<>();
+            multipart.add("file", filePart);
 
             extracted = workerClient.post()
                 .uri("/resume/parse")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(body.build())
+                .body(multipart)
                 .retrieve()
                 .body(Map.class);
         } catch (Exception ex) {
-            try { Files.deleteIfExists(destination); } catch (IOException ignored) {}
+            try {
+                Files.deleteIfExists(destination);
+            } catch (IOException ignored) {
+                // Preserve the original worker failure.
+            }
             throw new ResponseStatusException(
                 HttpStatus.BAD_GATEWAY,
                 "Resume extraction failed. Check the Python worker and OpenRouter configuration.");
+        }
+
+        if (extracted == null) {
+            try {
+                Files.deleteIfExists(destination);
+            } catch (IOException ignored) {
+                // Best-effort cleanup.
+            }
+            throw new ResponseStatusException(
+                HttpStatus.BAD_GATEWAY, "Resume worker returned an empty response.");
         }
 
         ResumeRecord resume = new ResumeRecord();
