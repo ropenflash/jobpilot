@@ -24,7 +24,9 @@ EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 URL_PATTERN = re.compile(r"\b(?:https?://|www\.)\S+", re.I)
 PRIVATE_LINE_PATTERN = re.compile(
     r"\b(?:e-?mail|phone|mobile|telephone|contact|address|linkedin|github|"
-    r"portfolio|date of birth|dob|current ctc|expected ctc|salary|compensation)\b",
+    r"portfolio|date of birth|dob|current ctc|expected ctc|salary|compensation|"
+    r"work authorization|work authorisation|visa|citizenship|nationality|gender|"
+    r"race|ethnicity|disability|veteran|marital status)\b",
     re.I,
 )
 PHONE_NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\+?\d[\s().-]*){9,}\d(?!\w)")
