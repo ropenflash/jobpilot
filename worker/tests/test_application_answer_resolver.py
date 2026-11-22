@@ -93,6 +93,21 @@ class StructuredApplicationAnswerResolverTests(unittest.TestCase):
         self.assertEqual(result["suggested_answer"], "4 years")
         self.assertIn("Approximate", result["reason"])
 
+    def test_iso_year_month_dates_are_counted_using_the_actual_month(self):
+        profile = {
+            "experience": [{
+                "title": "Java Engineer",
+                "start_date": "2018-01",
+                "end_date": "2020-06",
+                "description": "Built Java backend services.",
+                "technologies": ["Java"],
+            }]
+        }
+        years, _refs = _inferred_technology_years(
+            profile, "java", build_evidence(profile, {})
+        )
+        self.assertEqual(years, 2.5)
+
     def test_skills_list_alone_does_not_create_a_years_estimate(self):
         profile = {"skills": ["Java", "Kafka", "GCP"]}
         result = resolve_structured_question(
