@@ -16,6 +16,7 @@ public class JobRecord {
     private Map<String, Object> job;
     private Map<String, Object> requirements;
     private Map<String, Object> match;
+    private Map<String, Object> visualInspection;
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
 
@@ -35,6 +36,8 @@ public class JobRecord {
     public void setRequirements(Map<String, Object> requirements) { this.requirements = requirements; }
     public Map<String, Object> getMatch() { return match; }
     public void setMatch(Map<String, Object> match) { this.match = match; }
+    public Map<String, Object> getVisualInspection() { return visualInspection; }
+    public void setVisualInspection(Map<String, Object> visualInspection) { this.visualInspection = visualInspection; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
