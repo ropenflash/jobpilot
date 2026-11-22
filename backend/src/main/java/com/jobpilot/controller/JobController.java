@@ -102,6 +102,9 @@ public class JobController {
         Map<String, Object> job = asMap(result.get("job"));
         Map<String, Object> requirements = asMap(result.get("requirements"));
         Map<String, Object> match = asMap(result.get("match"));
+        Map<String, Object> visualInspection = result.get("visual_inspection") instanceof Map<?, ?>
+            ? asMap(result.get("visual_inspection"))
+            : new LinkedHashMap<>();
         String boardToken = String.valueOf(job.get("board_token"));
         String sourceJobId = String.valueOf(job.get("job_id"));
         String stableId = "greenhouse-" + boardToken + "-" + sourceJobId;
@@ -120,6 +123,7 @@ public class JobController {
         record.setJob(job);
         record.setRequirements(requirements);
         record.setMatch(match);
+        record.setVisualInspection(visualInspection);
         record.setUpdatedAt(Instant.now());
         mongo.save(record);
 
@@ -158,6 +162,7 @@ public class JobController {
         response.put("job", record.getJob());
         response.put("requirements", record.getRequirements());
         response.put("match", record.getMatch());
+        response.put("visual_inspection", record.getVisualInspection());
         response.put("createdAt", record.getCreatedAt());
         response.put("updatedAt", record.getUpdatedAt());
         return response;
