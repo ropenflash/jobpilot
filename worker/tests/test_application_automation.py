@@ -65,6 +65,7 @@ class ApplicationAutomationTests(unittest.TestCase):
         self.assertEqual(_resume_upload_score({"label": "Resume / CV"}), 100)
         self.assertEqual(_resume_upload_score({"label": "Cover letter", "accept": ".pdf"}), -1)
         self.assertEqual(_resume_upload_score({"label": "Upload a file", "accept": ".pdf"}), 20)
+        self.assertEqual(_resume_upload_score({"label": "Upload a file", "accept": ".docx"}), 20)
 
     def test_does_not_guess_country_code_from_local_number(self):
         options = [{"value": "+91", "text": "India (+91)"}]
