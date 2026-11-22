@@ -159,3 +159,42 @@ python -m unittest discover -s tests -v
 - Authentication, authorization, multi-user isolation, encryption at rest and retention controls are not yet implemented.
 - Resumes contain personal information. Only upload files you are authorized to process.
 - Keep \`.env\`, API keys, local virtual environments, build outputs and uploaded resumes out of Git.
+
+
+## Milestone 5: Greenhouse application automation
+
+1. Run the Python worker on the same Mac/desktop where you want the visible browser window to appear. A worker hosted remotely opens its browser on that remote machine, not on your Mac.
+2. Install Playwright's Chromium browser once from the worker directory: `python -m playwright install chromium`.
+3. Keep `JOBPILOT_BROWSER_HEADLESS=false` in `.env`. The visible browser is intentional.
+4. Open an analyzed Greenhouse job, generate and review a tailored resume, then select **Apply with JobPilot**.
+5. Choose the tailored PDF and start the application. JobPilot opens the public Greenhouse posting, clicks Apply when needed, inspects the form, fills unambiguous contact fields from the verified profile and uploads the tailored PDF.
+6. Complete screening questions, custom dropdowns, and any manual verification in the visible Chromium window. Return to JobPilot and select **Refresh form review**.
+7. Review all fields in the browser. Check the explicit authorization box and select **Submit application** only when you are ready.
+8. JobPilot reports a submission as confirmed only when a Greenhouse application-received message is detected. If the result is uncertain, it will not retry; inspect Greenhouse and your email first.
+
+### Automation boundaries
+
+- Only HTTPS public Greenhouse job URLs on `boards.greenhouse.io` and `job-boards.greenhouse.io` are supported.
+- The worker uses a visible, local Playwright Chromium session. It is held in worker memory and expires after the configured inactivity period.
+- Only clearly identified name, email, phone, LinkedIn, GitHub and portfolio/website fields are eligible for autofill, and only when values exist in the verified profile. Existing filled values are not overwritten.
+- JobPilot does not guess answers about salary, notice period, work authorization, sponsorship, relocation, demographics, or screening questions. Sensitive fields remain manual.
+- CAPTCHA, identity checks and bot protections must be completed manually. JobPilot does not bypass them.
+- The form checklist stores field labels and completion flags, not the values typed into the application.
+- This is a single-user local-development workflow. It does not yet provide authentication, per-user browser isolation, remote browser streaming, or production-grade session recovery. Do not expose the backend or worker ports to the public internet.
+
+### New API
+
+**Spring Boot**
+- `POST /api/jobs/{jobId}/applications` with `{"tailoredResumeId":"..."}` — open the visible browser and prepare the application.
+- `GET /api/jobs/{jobId}/applications` — list application sessions for a job.
+- `GET /api/applications/{id}` — retrieve application state.
+- `POST /api/applications/{id}/refresh` — synchronize field completion from Chromium.
+- `POST /api/applications/{id}/submit` with `{"confirmSubmit":true}` — submit after explicit approval.
+- `POST /api/applications/{id}/cancel` — close the browser without submitting.
+
+**Python worker**
+- `POST /applications/prepare`
+- `GET /applications/{session_id}`
+- `POST /applications/{session_id}/refresh`
+- `POST /applications/{session_id}/submit`
+- `POST /applications/{session_id}/cancel`

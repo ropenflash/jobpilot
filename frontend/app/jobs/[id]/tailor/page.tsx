@@ -268,6 +268,9 @@ export default function TailorResumePage() {
                   <a href={API + selected.downloads.pdf} className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100">
                     Download PDF
                   </a>
+                  <a href={"/jobs/" + encodeURIComponent(jobId) + "/apply"} className="rounded-lg border border-emerald-300/30 px-4 py-2 text-sm font-semibold text-emerald-200">
+                    Continue to application
+                  </a>
                 </div>
               </div>
 
