@@ -115,6 +115,8 @@ class ApplicationAutomationTests(unittest.TestCase):
         self.assertEqual(values["city"], "Noida")
         self.assertEqual(values["country"], "India")
         self.assertEqual(values["experience_years"], 11.0)
+        approximate = ApplicationSessionManager()._profile_values({"total_experience_years": "11+ years"})
+        self.assertEqual(approximate["experience_years"], 11.0)
         self.assertEqual(values["linkedin"], "https://www.linkedin.com/in/example")
 
     def test_does_not_guess_country_code_from_local_number(self):
