@@ -102,6 +102,31 @@ def _validate_greenhouse_url(value: str):
 
 def _classify_field(label: str, name: str, input_type: str) -> str:
     text = f"{label} {name}".lower().replace("_", " ").replace("-", " ")
+    compact = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    if "unlabelled field" in text or text.strip() == "unlabelled":
+        return "unlabelled_field"
+    if "expected ctc" in text or "expected compensation" in text or "desired ctc" in text:
+        return "expected_ctc"
+    if "current ctc" in text or "current compensation" in text or "present ctc" in text:
+        return "current_ctc"
+    if "official notice period" in text or "notice period" in text:
+        return "notice_period"
+    if "last working day" in text or "last day of work" in text:
+        return "last_working_day"
+    if any(term in text for term in ("how soon can you join", "when can you join", "joining availability", "available to join")):
+        return "join_availability"
+    if "spring" in text and "microservice" in text and any(term in text for term in ("experience", "years")):
+        return "years_spring_boot_microservices"
+    if "java" in text and any(term in text for term in ("experience", "years")):
+        return "years_java"
+    if "spring" in text and any(term in text for term in ("experience", "years")):
+        return "years_spring_boot"
+    if "microservice" in text and any(term in text for term in ("experience", "years")):
+        return "years_microservices"
+    if "kafka" in text and any(term in text for term in ("experience", "years")):
+        return "years_kafka"
+    if ("gcp" in compact or "google cloud" in text) and any(term in text for term in ("experience", "years")):
+        return "years_gcp"
     if any(term in text for term in (
         "race", "ethnicity", "gender", "veteran", "disability",
         "sexual orientation", "pronoun", "date of birth", "citizenship",
