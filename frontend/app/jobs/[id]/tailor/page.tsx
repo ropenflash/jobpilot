@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+type ResumeStyle = "classic" | "modern" | "compact";
+
 type Bullet = {
   text: string;
   source_refs: string[];
@@ -59,6 +61,7 @@ type TailoredResumeRecord = {
   jobId: string;
   jobTitle: string;
   company: string;
+  resumeStyle?: ResumeStyle;
   profileResumeId: string;
   profileUpdatedAt: string;
   resume: TailoredResume;
@@ -146,6 +149,7 @@ export default function TailorResumePage() {
   const [job, setJob] = useState<Job | null>(null);
   const [records, setRecords] = useState<TailoredResumeRecord[]>([]);
   const [selected, setSelected] = useState<TailoredResumeRecord | null>(null);
+  const [selectedStyle, setSelectedStyle] = useState<ResumeStyle>("classic");
   const [masterProfile, setMasterProfile] = useState<MasterProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -197,7 +201,11 @@ export default function TailorResumePage() {
     try {
       const response = await fetch(
         API + "/api/jobs/" + encodeURIComponent(jobId) + "/tailored-resumes",
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ style: selectedStyle }),
+        },
       );
       const data = await response.json();
       if (!response.ok) throw new Error(errorMessage(data, "Could not generate the tailored resume."));
@@ -240,18 +248,51 @@ export default function TailorResumePage() {
           </p>
         </header>
 
-        <section className="mt-7 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-          <div>
-            <h2 className="font-semibold">Generate tailored resume</h2>
-            <p className="mt-1 text-sm text-slate-400">Creates an editable DOCX, a PDF and a source-linked change report.</p>
+        <section className="mt-7 rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-semibold">Choose a resume design</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-400">
+                The tailored content stays the same; the typography, spacing and visual hierarchy change.
+                Each generated version includes both PDF and editable Word files.
+              </p>
+            </div>
+            <button
+              onClick={generate}
+              disabled={generating}
+              className="rounded-xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40"
+            >
+              {generating ? "Generating documents..." : records.length ? "Generate new version" : "Generate tailored resume"}
+            </button>
           </div>
-          <button
-            onClick={generate}
-            disabled={generating}
-            className="rounded-xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40"
-          >
-            {generating ? "Generating documents..." : records.length ? "Generate new version" : "Generate tailored resume"}
-          </button>
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            {([
+              { value: "classic", title: "ATS Classic", description: "Conventional, restrained and highly scannable." },
+              { value: "modern", title: "Modern Professional", description: "Left-aligned header with stronger visual hierarchy." },
+              { value: "compact", title: "Compact Executive", description: "Tighter spacing for information-dense profiles." },
+            ] as { value: ResumeStyle; title: string; description: string }[]).map(option => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={selectedStyle === option.value}
+                onClick={() => setSelectedStyle(option.value)}
+                className={"rounded-xl border p-4 text-left transition " + (
+                  selectedStyle === option.value
+                    ? "border-cyan-300/60 bg-cyan-300/10"
+                    : "border-white/10 bg-black/10 hover:border-white/25"
+                )}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{option.title}</span>
+                  <span className={"h-4 w-4 rounded-full border " + (
+                    selectedStyle === option.value ? "border-cyan-200 bg-cyan-200 ring-2 ring-cyan-200/20" : "border-slate-500"
+                  )} />
+                </span>
+                <span className="mt-2 block text-xs leading-5 text-slate-400">{option.description}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-slate-500">Choose the style before generating. Older saved versions retain their original style.</p>
         </section>
 
         {error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">{error}</div>}
@@ -264,7 +305,12 @@ export default function TailorResumePage() {
               {records.map((record, index) => (
                 <button
                   key={record.id}
-                  onClick={() => { setSelected(record); setMessage(""); setError(""); }}
+                  onClick={() => {
+                    setSelected(record);
+                    setSelectedStyle(record.resumeStyle ?? "classic");
+                    setMessage("");
+                    setError("");
+                  }}
                   className={"rounded-xl border px-4 py-2 text-left text-sm " + (
                     selected?.id === record.id
                       ? "border-cyan-300/50 bg-cyan-300/10 text-cyan-100"
@@ -283,7 +329,9 @@ export default function TailorResumePage() {
             <section className="mt-7 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <div className="text-xs tracking-wider text-slate-400">DOCUMENT PREVIEW</div>
+                  <div className="text-xs tracking-wider text-slate-400">
+                    DOCUMENT PREVIEW · {({ classic: "ATS Classic", modern: "Modern Professional", compact: "Compact Executive" } as Record<ResumeStyle, string>)[selected.resumeStyle ?? "classic"]}
+                  </div>
                   <h2 className="mt-2 text-2xl font-semibold">{resume.full_name || "Candidate"}</h2>
                   <p className="mt-1 font-medium text-cyan-200">{resume.target_headline}</p>
                   <p className="mt-2 text-sm text-slate-400">
@@ -295,7 +343,7 @@ export default function TailorResumePage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <a href={API + selected.downloads.docx} className="rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950">
-                    Download DOCX
+                    Download Word (.docx)
                   </a>
                   <a href={API + selected.downloads.pdf} className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100">
                     Download PDF
