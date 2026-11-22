@@ -285,21 +285,28 @@ def _resume_conflicts(classification: str, candidate: str, resume: dict | None) 
     }
     for item in related:
         value = item["detail"]
-        if not value or _same_value(candidate, value):
+        if not value:
             continue
-        # Combined answers (e.g. Spring Boot + Microservices tenure) can contain
-        # multiple independently supported numeric values.
-        resume_number = _number(value)
-        if resume_number is not None:
-            if resume_number not in candidate_numbers and classification in RANGE_CLASSIFICATIONS:
-                conflicts.append({"source": "tailored_resume", **item})
-        elif classification in {
-            "full_name", "first_name", "last_name", "email", "phone", "linkedin",
-            "github", "website", "city", "country", "notice_period",
-            "last_working_day", "join_availability",
-        }:
-            if _normalize(candidate) != _normalize(value):
-                conflicts.append({"source": "tailored_resume", **item})
+        normalized_candidate = _normalize(candidate)
+        normalized_resume = _normalize(value)
+        matches = normalized_candidate == normalized_resume
+        if classification == "phone":
+            candidate_digits = re.sub(r"\D", "", candidate)
+            resume_digits = re.sub(r"\D", "", value)
+            matches = bool(candidate_digits and resume_digits) and (
+                candidate_digits == resume_digits
+                or candidate_digits.endswith(resume_digits)
+                or resume_digits.endswith(candidate_digits)
+            )
+        elif classification in {"city", "country", "website", "linkedin", "github", "join_availability", "last_working_day", "notice_period"}:
+            matches = bool(normalized_candidate and normalized_resume) and (
+                normalized_candidate in normalized_resume or normalized_resume in normalized_candidate
+            )
+        elif classification in RANGE_CLASSIFICATIONS:
+            resume_number = _number(value)
+            matches = resume_number is not None and resume_number in candidate_numbers
+        if not matches:
+            conflicts.append({"source": "tailored_resume", **item})
 
     # Catch explicit duration claims in resume prose for technology-specific fields.
     term = TECHNOLOGY_TERMS.get(classification)
