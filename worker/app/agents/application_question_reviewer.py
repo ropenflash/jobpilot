@@ -310,18 +310,22 @@ async def review_application_questions(
     ]
 
     if not reviewable or not evidence:
+        direct_and_sensitive = {**structured}
+        for item in sensitive:
+            direct_and_sensitive[item["field_index"]] = item
+        ordered = [
+            direct_and_sensitive[question["field_index"]]
+            for question in questions
+            if question["field_index"] in direct_and_sensitive
+        ]
         base = {
             "status": "completed",
             "questions_reviewed": len(questions),
-            "supported_count": 0,
-            "partial_count": 0,
-            "not_found_count": 0,
-            "manual_review_count": len(sensitive) + sum(
-                item["evidence_status"] == "manual_review" for item in structured.values()
-            ),
-            "profile_update_required_count": sum(
-                bool(item.get("needs_profile_update")) for item in structured.values()
-            ),
+            "supported_count": sum(item["evidence_status"] == "supported" for item in ordered),
+            "partial_count": sum(item["evidence_status"] == "partial" for item in ordered),
+            "not_found_count": sum(item["evidence_status"] == "not_found" for item in ordered),
+            "manual_review_count": sum(item["evidence_status"] == "manual_review" for item in ordered),
+            "profile_update_required_count": sum(bool(item.get("needs_profile_update")) for item in ordered),
             "profile_update_requests": [
                 {
                     "field_index": item["field_index"],
@@ -330,9 +334,9 @@ async def review_application_questions(
                     "recommendation": item.get("profile_improvement"),
                     "priority": "high",
                 }
-                for item in structured.values() if item.get("needs_profile_update")
+                for item in ordered if item.get("needs_profile_update")
             ],
-            "reviews": list(structured.values()) + sensitive,
+            "reviews": ordered,
             "profile_improvements": [],
         }
         for question in reviewable:
@@ -349,6 +353,13 @@ async def review_application_questions(
             base["not_found_count"] += 1
         return base
 
+    ai_evidence = [
+        item for item in evidence
+        if not (
+            item["source"] == "verified_profile"
+            and item["path"].split(".", 1)[0].split("[", 1)[0].lower() in PRIVATE_PROFILE_KEYS
+        )
+    ]
     prompt = {
         "instructions": [
             "Assess each application question only against the supplied verified profile and tailored-resume evidence.",
@@ -363,7 +374,7 @@ async def review_application_questions(
             "Each profile_improvements item must contain field_index and recommendation. Only refer to information the candidate can truthfully add if it is accurate.",
         ],
         "questions": reviewable,
-        "evidence": evidence,
+        "evidence": ai_evidence,
     }
     messages = [
         {
@@ -378,7 +389,7 @@ async def review_application_questions(
     ]
     try:
         raw = await generate_text(messages, json_mode=True, max_output_tokens=5500)
-        normalized = normalize_review(_parse_json(raw), reviewable, evidence)
+        normalized = normalize_review(_parse_json(raw), reviewable, ai_evidence)
         by_index = {item["field_index"]: item for item in normalized["reviews"]}
         for item in structured.values():
             by_index[item["field_index"]] = item
