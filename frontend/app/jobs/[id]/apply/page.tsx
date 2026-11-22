@@ -493,7 +493,7 @@ export default function ApplyPage() {
               )}
             </section>
 
-            {application.questionReview && (
+            {application.questionReview && Array.isArray(application.questionReview.reviews) && (
               <section className="mt-5 rounded-2xl border border-violet-300/20 bg-violet-300/[0.04] p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
