@@ -176,7 +176,7 @@ def _profile_supports(
     if classification == "phone_country_code":
         digits = re.sub(r"\D", "", candidate)
         for entry in related:
-            phone_digits = re.sub(r"\\D", "", entry["detail"])
+            phone_digits = re.sub(r"\D", "", entry["detail"])
             if digits and phone_digits.startswith(digits):
                 return True, [entry]
     if classification == "last_working_day" and _normalize(candidate) == "notcurrentlyservingnotice":
@@ -263,7 +263,7 @@ def _resume_conflicts(classification: str, candidate: str, resume: dict | None) 
     related = [item for item in entries if _path_matches(item["path"], aliases)]
     conflicts = []
     candidate_numbers = {
-        float(value) for value in re.findall(r"(?<!\\w)(\\d+(?:\\.\\d+)?)", candidate.replace(",", ""))
+        float(value) for value in re.findall(r"(?<!\w)(\d+(?:\.\d+)?)", candidate.replace(",", ""))
     }
     for item in related:
         value = item["detail"]
@@ -275,7 +275,11 @@ def _resume_conflicts(classification: str, candidate: str, resume: dict | None) 
         if resume_number is not None:
             if resume_number not in candidate_numbers and classification in RANGE_CLASSIFICATIONS:
                 conflicts.append({"source": "tailored_resume", **item})
-        elif classification in {"full_name", "first_name", "last_name", "email", "phone", "linkedin", "github", "website", "city", "country"}:
+        elif classification in {
+            "full_name", "first_name", "last_name", "email", "phone", "linkedin",
+            "github", "website", "city", "country", "notice_period",
+            "last_working_day", "join_availability",
+        }:
             if _normalize(candidate) != _normalize(value):
                 conflicts.append({"source": "tailored_resume", **item})
 
@@ -295,7 +299,7 @@ def _resume_conflicts(classification: str, candidate: str, resume: dict | None) 
                     resume_years = float(match.group(1))
                     candidate_years = _number(candidate)
                     candidate_year_numbers = {
-                        float(value) for value in re.findall(r"(?<!\\w)(\\d+(?:\\.\\d+)?)", candidate.replace(",", ""))
+                        float(value) for value in re.findall(r"(?<!\w)(\d+(?:\.\d+)?)", candidate.replace(",", ""))
                     }
                     if candidate_years is not None and resume_years not in candidate_year_numbers:
                         conflicts.append({
