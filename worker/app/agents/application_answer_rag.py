@@ -6,8 +6,11 @@ that the candidate has a skill or experience.
 """
 from __future__ import annotations
 
+import base64
 import math
 import re
+
+import fitz
 from collections import Counter
 from typing import Any
 
@@ -15,6 +18,15 @@ from typing import Any
 MAX_JOB_DESCRIPTION_CHARS = 5000
 MAX_CONTEXT_LIST_ITEMS = 15
 DEFAULT_TOP_K = 8
+MAX_SOURCE_RESUME_BYTES = 5 * 1024 * 1024
+MAX_SOURCE_RESUME_CHARS = 60000
+EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
+URL_PATTERN = re.compile(r"\b(?:https?://|www\.)\S+", re.I)
+PRIVATE_LINE_PATTERN = re.compile(
+    r"\b(?:e-?mail|phone|mobile|telephone|contact|address|linkedin|github|"
+    r"portfolio|date of birth|dob|current ctc|expected ctc|salary|compensation)\b",
+    re.I,
+)
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "been", "being", "by", "can",
@@ -120,6 +132,42 @@ def build_job_context(raw_context: dict | None) -> dict:
         "visual_findings": [_clean(item)[:300] for item in findings if _clean(item)][:8],
     }
 
+
+
+def sanitize_original_resume_text(text: str, career_profile: dict | None = None) -> str:
+    """Remove obvious personal-contact and compensation lines before RAG indexing."""
+    full_name = _clean((career_profile or {}).get("full_name"))
+    safe_lines = []
+    for raw_line in (text or "").splitlines():
+        line = _clean(raw_line)
+        if not line:
+            continue
+        if EMAIL_PATTERN.search(line) or URL_PATTERN.search(line) or PRIVATE_LINE_PATTERN.search(line):
+            continue
+        if full_name:
+            line = re.sub(re.escape(full_name), "", line, flags=re.I).strip(" |,-")
+        if not line or len(line) < 2:
+            continue
+        safe_lines.append(line)
+    return "\n".join(safe_lines)[:MAX_SOURCE_RESUME_CHARS]
+
+
+def extract_original_resume_text(encoded_pdf: str | None, career_profile: dict | None = None) -> str:
+    """Extract and sanitize a bounded PDF text stream without writing the PDF to disk."""
+    if not encoded_pdf:
+        return ""
+    try:
+        pdf_bytes = base64.b64decode(encoded_pdf, validate=True)
+    except Exception as exc:
+        raise ValueError("The original resume PDF payload is not valid base64.") from exc
+    if not pdf_bytes.startswith(b"%PDF") or len(pdf_bytes) > MAX_SOURCE_RESUME_BYTES:
+        raise ValueError("The original resume must be a valid PDF no larger than 5 MB.")
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+            raw_text = "\n".join(page.get_text() for page in document)
+    except Exception as exc:
+        raise ValueError("The original resume PDF could not be read.") from exc
+    return sanitize_original_resume_text(raw_text, career_profile)
 
 def _weighted_query(question: dict, job_context: dict) -> dict[str, float]:
     question_text = " ".join((
