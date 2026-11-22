@@ -6,6 +6,7 @@ A human-in-the-loop job application copilot.
 - Spring Boot control plane with MongoDB
 - Python FastAPI worker
 - Gemini on Vertex AI for model inference
+- Greenhouse Job Board API for public job-post retrieval
 - Playwright browser automation is planned; this milestone does not submit applications.
 
 **Safety boundary:** JobPilot prepares and reviews application data. No job application is submitted without explicit user confirmation in a later milestone. Never put credentials or secrets in prompts or source control.
@@ -41,7 +42,7 @@ gcloud auth application-default login
 export GCP_PROJECT="agentos-514612"
 export GCP_LOCATION="global"
 export VERTEX_MODEL="gemini-3.8-flash"
-export VERTEX_MAX_TOKENS=3000
+export VERTEX_MAX_TOKENS=5000
 
 python -m uvicorn app.main:app --reload --port 8000
 ```
@@ -66,13 +67,16 @@ Copy `.env.example` to your local `.env`. The worker loads that file on startup.
 - `POST /api/resumes` — upload a PDF resume
 - `GET /api/profile` — load the saved career profile
 - `PUT /api/profile` — save a reviewed career profile
+- `POST /api/jobs/analyze` — analyze a public Greenhouse job against the verified profile
+- `GET /api/jobs` — list the latest 50 saved job analyses
+- `GET /api/jobs/{id}` — retrieve a saved job analysis
 
 ### Python worker
 - `GET /health` — worker health
 - `GET /ai/status` — Vertex project, location, and model
 - `POST /ai/chat` — Gemini chat completion on Vertex AI
 - `POST /resume/parse` — extract structured career facts from a PDF
-- `POST /jobs/analyze` — currently validates a job URL; Greenhouse extraction comes in Milestone 3
+- `POST /jobs/analyze` — retrieve a public Greenhouse posting, extract requirements and match evidence
 
 ## Milestone 2: Resume intelligence
 1. Open http://localhost:3000/profile.
@@ -84,12 +88,39 @@ Copy `.env.example` to your local `.env`. The worker loads that file on startup.
 
 Scanned/image-only PDFs are not supported yet; OCR is a future enhancement. AI extraction is a draft and must be checked before relying on it.
 
+## Milestone 3: Greenhouse job intelligence
+1. Verify your saved career profile at http://localhost:3000/profile.
+2. Open http://localhost:3000/jobs.
+3. Paste a public job URL with this format: `https://boards.greenhouse.io/{board_token}/jobs/{job_id}`. The alternate `job-boards.greenhouse.io` host is also accepted.
+4. Spring Boot checks that the verified career profile exists and sends the URL plus profile facts (excluding contact identifiers) to the Python worker.
+5. The worker validates the exact Greenhouse host and URL path, then calls the public Greenhouse Job Board API with `content=true`.
+6. The worker converts the returned HTML description into plain text and asks Gemini to extract role requirements and compare them with the career profile.
+7. The worker returns requirement-level evidence. The application calculates a deterministic score: required skills 40%, experience/responsibilities 30%, project evidence 20%, and preferred skills 10%. Categories absent from the job/profile comparison are excluded and the remaining weights are normalized to 100%.
+8. Spring Boot saves the job, requirements, score and evidence in MongoDB's `jobs` collection. The same Greenhouse board token and job ID update the existing record rather than creating duplicates.
+9. Review the score breakdown, matched evidence and gaps in the Jobs page. The score is a profile-evidence estimate, not a prediction of hiring success.
+
+### Supported URLs and limitations
+- Only public Greenhouse job postings on `boards.greenhouse.io` and `job-boards.greenhouse.io` are supported.
+- URL validation uses an exact hostname allow-list; the worker does not fetch arbitrary user-supplied hosts.
+- The job must still be publicly available through the Greenhouse Job Board API.
+- Company name is not present in every public Greenhouse job payload; in that case the board token is used as a display fallback.
+- Job analysis does not tailor a resume, open a browser, fill an application, or submit anything.
+- AI output can be incomplete. Confirm the job description and evidence before using the analysis to make decisions.
+
 ## Vertex smoke test
 ```bash
 curl -X POST http://localhost:8000/ai/chat \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"Reply with JobPilot AI is working"}]}'
 ```
+
+## Test job retrieval and analysis
+```bash
+curl -X POST http://localhost:8080/api/jobs/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://boards.greenhouse.io/{board_token}/jobs/{job_id}"}'
+```
+Replace the example URL with a currently published public Greenhouse posting.
 
 ## Security and limitations
 - This is a local-development MVP, not production-hardened.

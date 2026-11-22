@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from urllib.parse import urlparse
 
 import fitz
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
+from app.agents.job_analyzer import analyze_and_match
+from app.schemas.job import JobAnalysisResponse
 from app.schemas.resume import ResumeProfile
+from app.services.greenhouse import fetch_greenhouse_job
 from app.services.vertex_client import (
     VertexError,
     credentials_available,
@@ -22,13 +24,14 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 app = FastAPI(
     title="JobPilot Worker",
-    version="0.3.0",
-    description="AI and browser worker using Gemini on Vertex AI."
+    version="0.4.0",
+    description="AI resume extraction and Greenhouse job analysis worker using Vertex AI."
 )
 
 
 class AnalyzeJobRequest(BaseModel):
     url: HttpUrl
+    career_profile: dict = Field(min_length=1)
 
 
 class ChatMessage(BaseModel):
@@ -119,7 +122,6 @@ async def parse_resume(file: UploadFile = File(...)):
             ],
             json_mode=True,
         )
-        print(raw)
         parsed = json.loads(raw)
         return ResumeProfile.model_validate(parsed)
     except VertexError as exc:
@@ -137,14 +139,7 @@ async def parse_resume(file: UploadFile = File(...)):
         ) from exc
 
 
-@app.post("/jobs/analyze")
+@app.post("/jobs/analyze", response_model=JobAnalysisResponse)
 async def analyze_job(request: AnalyzeJobRequest):
-    parsed = urlparse(str(request.url))
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(status_code=400, detail="Only HTTP(S) URLs are supported.")
-    return {
-        "status": "RECEIVED",
-        "portal": "GREENHOUSE" if parsed.hostname and "greenhouse.io" in parsed.hostname else "UNKNOWN",
-        "url": str(request.url),
-        "message": "URL validated. Greenhouse extraction will be added in Milestone 3.",
-    }
+    job_data = await fetch_greenhouse_job(str(request.url))
+    return await analyze_and_match(job_data, request.career_profile)
