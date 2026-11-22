@@ -187,16 +187,33 @@ public class ApplicationController {
                 "Refresh the application and complete every required field before submitting."
             );
         }
-        Map<String, Object> result = callWorker(
-            "/applications/" + record.getBrowserSessionId() + "/submit",
-            Map.of("confirm_submit", true)
-        );
-        applyWorkerResult(record, result);
-        if ("SUBMITTED".equals(record.getStatus())) {
-            record.setSubmittedAt(Instant.now());
-        }
+        // Persist the approval gate before contacting the worker. A retry or timeout
+        // cannot turn the same application record back into a second submit attempt.
+        record.setStatus("SUBMITTING");
+        record.setApprovedAt(Instant.now());
+        record.setUpdatedAt(Instant.now());
         mongo.save(record);
-        return toResponse(record);
+
+        try {
+            Map<String, Object> result = callWorker(
+                "/applications/" + record.getBrowserSessionId() + "/submit",
+                Map.of("confirm_submit", true)
+            );
+            applyWorkerResult(record, result);
+            if ("SUBMITTED".equals(record.getStatus())) {
+                record.setSubmittedAt(Instant.now());
+            }
+            mongo.save(record);
+            return toResponse(record);
+        } catch (ResponseStatusException ex) {
+            record.setStatus("SUBMISSION_UNKNOWN");
+            record.setMessage(
+                "JobPilot could not confirm the submit result. Check Greenhouse and your email before taking any further action."
+            );
+            record.setUpdatedAt(Instant.now());
+            mongo.save(record);
+            throw ex;
+        }
     }
 
     @PostMapping("/applications/{id}/cancel")
@@ -317,6 +334,7 @@ public class ApplicationController {
         response.put("message", record.getMessage());
         response.put("createdAt", record.getCreatedAt());
         response.put("updatedAt", record.getUpdatedAt());
+        response.put("approvedAt", record.getApprovedAt());
         response.put("submittedAt", record.getSubmittedAt());
         return response;
     }
