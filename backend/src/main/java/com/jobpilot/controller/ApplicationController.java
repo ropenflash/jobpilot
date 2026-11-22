@@ -16,6 +16,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -53,7 +54,7 @@ public class ApplicationController {
         this.tailoredDirectory = Path.of(tailoredDir).toAbsolutePath().normalize();
     }
 
-    public record PrepareApplicationRequest(@NotBlank String tailoredResumeId) {}
+    public record PrepareApplicationRequest(@NotBlank String tailoredResumeId, String format) {}
     public record SubmitApplicationRequest(boolean confirmSubmit) {}
 
     @PostMapping("/jobs/{jobId}/applications")
@@ -82,27 +83,44 @@ public class ApplicationController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Verify your career profile before applying.");
         }
 
-        Path pdfPath = Path.of(tailored.getPdfPath()).toAbsolutePath().normalize();
-        if (!pdfPath.startsWith(tailoredDirectory)) {
+        String format = request.format() == null || request.format().isBlank()
+            ? "pdf" : request.format().trim().toLowerCase(Locale.ROOT);
+        if (!"pdf".equals(format) && !"docx".equals(format)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Resume format must be pdf or docx.");
+        }
+        Path resumePath = Path.of("docx".equals(format) ? tailored.getDocxPath() : tailored.getPdfPath())
+            .toAbsolutePath().normalize();
+        if (!resumePath.startsWith(tailoredDirectory)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Invalid tailored resume storage path.");
         }
 
-        byte[] pdfBytes;
+        byte[] resumeBytes;
         try {
-            pdfBytes = Files.readAllBytes(pdfPath);
+            resumeBytes = Files.readAllBytes(resumePath);
         } catch (IOException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "The tailored PDF is missing. Generate it again.", ex);
+            throw new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "The tailored " + format.toUpperCase(Locale.ROOT) + " is missing. Generate it again.",
+                ex
+            );
         }
-        if (pdfBytes.length == 0 || pdfBytes.length > 12 * 1024 * 1024
-                || !(pdfBytes.length >= 4 && pdfBytes[0] == '%' && pdfBytes[1] == 'P'
-                    && pdfBytes[2] == 'D' && pdfBytes[3] == 'F')) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "The tailored resume PDF is invalid or too large.");
+        boolean validPdf = "pdf".equals(format) && resumeBytes.length >= 4
+            && resumeBytes[0] == '%' && resumeBytes[1] == 'P'
+            && resumeBytes[2] == 'D' && resumeBytes[3] == 'F';
+        boolean validDocx = "docx".equals(format) && resumeBytes.length >= 2
+            && resumeBytes[0] == 'P' && resumeBytes[1] == 'K';
+        if (resumeBytes.length == 0 || resumeBytes.length > 12 * 1024 * 1024 || !(validPdf || validDocx)) {
+            throw new ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "The tailored " + format.toUpperCase(Locale.ROOT) + " is invalid or too large."
+            );
         }
 
         ApplicationRecord record = new ApplicationRecord();
         record.setId(UUID.randomUUID().toString());
         record.setJobId(jobId);
         record.setTailoredResumeId(tailored.getId());
+        record.setResumeFormat(format);
         record.setJobTitle(String.valueOf(job.getJob().getOrDefault("title", "Target role")));
         record.setCompany(String.valueOf(job.getJob().getOrDefault("company", "")));
         record.setStatus("CREATED");
@@ -114,7 +132,8 @@ public class ApplicationController {
         workerRequest.put("application_id", record.getId());
         workerRequest.put("job_url", job.getJobUrl());
         workerRequest.put("career_profile", profile.getExtracted());
-        workerRequest.put("tailored_resume_pdf_base64", Base64.getEncoder().encodeToString(pdfBytes));
+        workerRequest.put("tailored_resume_base64", Base64.getEncoder().encodeToString(resumeBytes));
+        workerRequest.put("tailored_resume_filename", "tailored-resume." + format);
 
         try {
             Map<String, Object> workerResult = workerClient.post()
@@ -325,6 +344,7 @@ public class ApplicationController {
         response.put("id", record.getId());
         response.put("jobId", record.getJobId());
         response.put("tailoredResumeId", record.getTailoredResumeId());
+        response.put("resumeFormat", record.getResumeFormat() == null ? "pdf" : record.getResumeFormat());
         response.put("jobTitle", record.getJobTitle());
         response.put("company", record.getCompany());
         response.put("applicationUrl", record.getApplicationUrl());
