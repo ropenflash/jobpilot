@@ -135,6 +135,69 @@ class ApplicationAnswerRagIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(review["suggested_answer"], "10 years")
         self.assertEqual(review["evidence"][0]["source"], "tailored_resume")
 
+    async def test_original_pdf_text_can_support_answer_when_profile_and_tailored_resume_omit_it(self):
+        fields = [{
+            "index": 4,
+            "label": "Describe your experience building Kafka event pipelines.",
+            "type": "textarea",
+            "required": True,
+            "filled": False,
+            "classification": "manual",
+        }]
+        profile = {
+            "full_name": "Candidate Example",
+            "skills": ["Java"],
+            "experience": [{"title": "Backend Engineer", "description": "Built backend services."}],
+        }
+        tailored_resume = {"summary": "Backend engineer with Java service experience."}
+        source_resume_text = (
+            "Designed Kafka event pipelines for near-real-time order processing. "
+            "Implemented retry handling and dead-letter queues for failed events."
+        )
+
+        async def model_response(messages, **kwargs):
+            prompt = json.loads(messages[1]["content"])
+            question = prompt["questions"][0]
+            evidence = question["retrieved_evidence"]
+            original = [item for item in evidence if item["source"] == "original_resume"]
+            self.assertTrue(original, "Question context should retrieve evidence from the original PDF")
+            self.assertIn("Kafka event pipelines", " ".join(item["text"] for item in original))
+            return json.dumps({
+                "reviews": [{
+                    "field_index": 4,
+                    "category": "technical_experience",
+                    "evidence_status": "supported",
+                    "reason": "The original uploaded resume describes Kafka event-pipeline delivery.",
+                    "evidence_refs": [original[0]["id"]],
+                    "suggested_answer": (
+                        "I designed Kafka event pipelines for near-real-time order processing "
+                        "and implemented retry handling and dead-letter queues."
+                    ),
+                    "profile_improvement": None,
+                }],
+                "profile_improvements": [],
+            })
+
+        with patch(
+            "app.agents.application_question_reviewer.generate_text",
+            new_callable=AsyncMock,
+            side_effect=model_response,
+        ) as generate:
+            result = await review_application_questions(
+                fields,
+                profile,
+                tailored_resume,
+                {},
+                source_resume_text,
+            )
+
+        generate.assert_awaited_once()
+        review = result["reviews"][0]
+        self.assertEqual(review["evidence_status"], "supported")
+        self.assertEqual(review["evidence"][0]["source"], "original_resume")
+        self.assertIn("Original resume", review["evidence"][0]["path"])
+        self.assertIn("original_resume", review["retrieval"]["sources"])
+
     async def test_job_requirements_alone_never_become_candidate_evidence(self):
         fields = [{
             "index": 1,
