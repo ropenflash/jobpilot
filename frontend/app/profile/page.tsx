@@ -239,7 +239,7 @@ export default function ProfilePage() {
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            {(["full_name", "email", "phone", "location", "headline", "total_experience_years", "linkedin_url"] as const).map(key => (
+            {(["full_name", "email", "phone", "city", "location", "headline", "total_experience_years", "linkedin_url"] as const).map(key => (
               <label key={key} className="text-sm capitalize text-slate-400">
                 {key.replaceAll("_", " ")}
                 <input value={profile[key] ?? (key === "linkedin_url" ? profile.linkedin ?? "" : "")}
