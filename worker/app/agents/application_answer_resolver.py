@@ -69,6 +69,13 @@ def _month_index(value: str, *, is_end: bool = False) -> int | None:
         today = date.today()
         return today.year * 12 + today.month - 1
 
+    iso_year_month = re.match(
+        r"^(19\d{2}|20\d{2})[-/.](0?[1-9]|1[0-2])(?:[-/.]\d{1,2})?$",
+        text,
+    )
+    if iso_year_month:
+        return int(iso_year_month.group(1)) * 12 + int(iso_year_month.group(2)) - 1
+
     year_match = re.search(r"\b(19\d{2}|20\d{2})\b", text)
     if not year_match:
         return None
