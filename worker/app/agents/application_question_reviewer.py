@@ -5,9 +5,9 @@ from typing import Any
 from app.services.vertex_client import VertexError, generate_text
 
 
-MAX_QUESTIONS = 35
-MAX_EVIDENCE_ITEMS = 100
-MAX_EVIDENCE_CHARS = 900
+MAX_QUESTIONS = 25
+MAX_EVIDENCE_ITEMS = 60
+MAX_EVIDENCE_CHARS = 700
 
 
 def _clean(value: Any) -> str:
@@ -71,6 +71,13 @@ def build_questions(fields: list[dict]) -> list[dict]:
         if control_type in {"file", "button", "submit", "hidden"}:
             continue
         label = _clean(field.get("label")) or "Unlabelled field"
+        field_identity = " ".join((
+            label,
+            _clean(field.get("name")),
+            _clean(field.get("id")),
+        )).lower()
+        if any(term in field_identity for term in ("recaptcha", "captcha", "honeypot")):
+            continue
         options = field.get("options") or []
         normalized_options = []
         for option in options[:25]:
@@ -331,7 +338,7 @@ async def review_application_questions(
         {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
     ]
     try:
-        raw = await generate_text(messages, json_mode=True, max_output_tokens=3500)
+        raw = await generate_text(messages, json_mode=True, max_output_tokens=5500)
         normalized = normalize_review(_parse_json(raw), reviewable, evidence)
         by_index = {item["field_index"]: item for item in normalized["reviews"]}
         for item in sensitive:
