@@ -1,19 +1,29 @@
 from datetime import datetime, timezone
 import json
-import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 import fitz
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
 from app.schemas.resume import ResumeProfile
-from app.services.openrouter_client import OpenRouterError, chat_completion
+from app.services.vertex_client import (
+    VertexError,
+    credentials_available,
+    generate_text,
+    location,
+    model_name,
+    project_id,
+)
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 app = FastAPI(
     title="JobPilot Worker",
     version="0.3.0",
-    description="AI and browser worker using OpenRouter."
+    description="AI and browser worker using Gemini on Vertex AI."
 )
 
 
@@ -43,20 +53,23 @@ async def health():
 @app.get("/ai/status")
 async def ai_status():
     return {
-        "provider": "openrouter",
-        "configured": bool(os.getenv("OPENROUTER_API_KEY")),
-        "model": os.getenv("OPENROUTER_MODEL", "openai/gpt-4o"),
+        "provider": "vertex",
+        "configured": credentials_available(),
+        "project": project_id(),
+        "location": location(),
+        "model": model_name(),
     }
 
 
 @app.post("/ai/chat")
 async def ai_chat(request: ChatRequest):
     try:
-        return await chat_completion(
+        content = await generate_text(
             [message.model_dump() for message in request.messages],
             request.model,
         )
-    except OpenRouterError as exc:
+        return {"provider": "vertex", "model": request.model or model_name(), "content": content}
+    except VertexError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -96,7 +109,7 @@ async def parse_resume(file: UploadFile = File(...)):
     )
 
     try:
-        result = await chat_completion(
+        raw = await generate_text(
             [
                 {
                     "role": "system",
@@ -104,17 +117,23 @@ async def parse_resume(file: UploadFile = File(...)):
                 },
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"},
+            json_mode=True,
         )
-        raw = result["choices"][0]["message"]["content"]
+        print(raw)
         parsed = json.loads(raw)
         return ResumeProfile.model_validate(parsed)
-    except OpenRouterError as exc:
+    except VertexError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+    except json.JSONDecodeError as exc:
         raise HTTPException(
             status_code=502,
-            detail="The model returned an invalid profile. Please retry.",
+            detail="The model did not return JSON. Please retry.",
+        ) from exc
+    except ValidationError as exc:
+        fields = ", ".join(".".join(str(part) for part in error["loc"]) for error in exc.errors())
+        raise HTTPException(
+            status_code=502,
+            detail=f"The model returned a profile that does not match the expected fields: {fields}.",
         ) from exc
 
 
