@@ -22,6 +22,7 @@ public class ApplicationRecord {
     private List<String> missingRequiredFields;
     private String message;
     private List<String> automationNotes;
+    private Map<String, Object> formVerification = Map.of();
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
     private Instant approvedAt;
@@ -53,6 +54,10 @@ public class ApplicationRecord {
     public void setMessage(String message) { this.message = message; }
     public List<String> getAutomationNotes() { return automationNotes; }
     public void setAutomationNotes(List<String> automationNotes) { this.automationNotes = automationNotes; }
+    public Map<String, Object> getFormVerification() { return formVerification; }
+    public void setFormVerification(Map<String, Object> formVerification) {
+        this.formVerification = formVerification == null ? Map.of() : formVerification;
+    }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
