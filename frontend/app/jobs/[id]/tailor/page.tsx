@@ -67,6 +67,33 @@ type TailoredResumeRecord = {
   downloads: { pdf: string; docx: string };
 };
 
+type MasterExperience = {
+  company?: string | null;
+  title?: string | null;
+  location?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  description?: string | null;
+  technologies?: string[];
+};
+
+type MasterProject = {
+  name?: string | null;
+  description?: string | null;
+  technologies?: string[];
+};
+
+type MasterProfile = {
+  full_name?: string | null;
+  headline?: string | null;
+  professional_summary?: string | null;
+  skills?: string[];
+  experience?: MasterExperience[];
+  projects?: MasterProject[];
+  education?: Record<string, string>[];
+  certifications?: string[];
+};
+
 type Job = {
   id: string;
   job: { title: string; company: string; location?: string };
@@ -119,6 +146,7 @@ export default function TailorResumePage() {
   const [job, setJob] = useState<Job | null>(null);
   const [records, setRecords] = useState<TailoredResumeRecord[]>([]);
   const [selected, setSelected] = useState<TailoredResumeRecord | null>(null);
+  const [masterProfile, setMasterProfile] = useState<MasterProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
@@ -129,9 +157,10 @@ export default function TailorResumePage() {
 
     async function load() {
       try {
-        const [jobResponse, historyResponse] = await Promise.all([
+        const [jobResponse, historyResponse, profileResponse] = await Promise.all([
           fetch(API + "/api/jobs/" + encodeURIComponent(jobId), { cache: "no-store" }),
           fetch(API + "/api/jobs/" + encodeURIComponent(jobId) + "/tailored-resumes", { cache: "no-store" }),
+          fetch(API + "/api/profile", { cache: "no-store" }),
         ]);
 
         if (!jobResponse.ok) {
@@ -142,9 +171,12 @@ export default function TailorResumePage() {
         const history: TailoredResumeRecord[] = historyResponse.ok
           ? await historyResponse.json()
           : [];
+        const profileData = profileResponse.ok ? await profileResponse.json() : null;
+        const sourceProfile = profileData?.configured ? profileData.profile as MasterProfile : null;
 
         if (!active) return;
         setJob(jobData);
+        setMasterProfile(sourceProfile);
         setRecords(history);
         if (history.length) setSelected(history[0]);
       } catch (err) {
@@ -275,115 +307,221 @@ export default function TailorResumePage() {
               </div>
 
               <div className="mt-7 border-t border-white/10 pt-5">
-                <h3 className="font-semibold">Professional summary</h3>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-300">{resume.professional_summary}</p>
-                <Evidence refs={resume.summary_source_refs} evidence={resume.summary_source_evidence} />
-              </div>
-
-              <div className="mt-6">
-                <h3 className="font-semibold">Core skills</h3>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {resume.skills.map(skill => (
-                    <span key={skill} className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200">{skill}</span>
-                  ))}
-                  {!resume.skills.length && <span className="text-sm text-slate-500">No skills were selected from the profile.</span>}
-                </div>
-              </div>
-
-              <div className="mt-7">
-                <h3 className="font-semibold">Professional experience</h3>
-                <div className="mt-3 space-y-5">
-                  {resume.experience.map((item, index) => (
-                    <article key={item.source_index} className="border-l-2 border-cyan-300/40 pl-4">
-                      <div className="font-semibold">{item.title} · {item.company}</div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {[dateRange(item), item.location].filter(Boolean).join(" · ")}
-                      </p>
-                      <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-300">
-                        {item.bullets.map((bullet, bulletIndex) => (
-                          <li key={bulletIndex}>
-                            {bullet.text}
-                            <Evidence refs={bullet.source_refs} evidence={bullet.source_evidence} />
-                          </li>
-                        ))}
-                      </ul>
-                      {item.technologies.length > 0 && (
-                        <p className="mt-2 text-xs text-slate-500">Technologies: {item.technologies.join(", ")}</p>
-                      )}
-                    </article>
-                  ))}
-                </div>
-              </div>
-
-              {resume.projects.length > 0 && (
-                <div className="mt-7">
-                  <h3 className="font-semibold">Selected projects</h3>
-                  <div className="mt-3 space-y-4">
-                    {resume.projects.map(item => (
-                      <article key={item.source_index} className="rounded-xl border border-white/10 p-4">
-                        <h4 className="font-medium">{item.name}</h4>
-                        <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-300">
-                          {item.bullets.map((bullet, index) => (
-                            <li key={index}>
-                              {bullet.text}
-                              <Evidence refs={bullet.source_refs} evidence={bullet.source_evidence} />
-                            </li>
-                          ))}
-                        </ul>
-                        {item.technologies.length > 0 && (
-                          <p className="mt-2 text-xs text-slate-500">Technologies: {item.technologies.join(", ")}</p>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {resume.education.length > 0 && (
-                <div className="mt-7">
-                  <h3 className="font-semibold">Education</h3>
-                  {resume.education.map((item, index) => (
-                    <p key={index} className="mt-2 text-sm text-slate-300">
-                      {[item.degree, item.field_of_study, item.institution, item.graduation_year].filter(Boolean).join(" · ")}
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-semibold">Side-by-side resume comparison</h3>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Master profile on the left · generated, job-targeted version on the right
                     </p>
-                  ))}
+                  </div>
+                  <span className="text-xs text-slate-500">Read-only · master profile stays unchanged</span>
                 </div>
-              )}
 
-              {resume.certifications.length > 0 && (
-                <div className="mt-7">
-                  <h3 className="font-semibold">Certifications</h3>
-                  <ul className="mt-2 list-disc pl-5 text-sm text-slate-300">
-                    {resume.certifications.map((item, index) => <li key={index}>{item}</li>)}
-                  </ul>
-                </div>
-              )}
-            </section>
+                {!masterProfile && (
+                  <div className="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100">
+                    The master profile could not be loaded. Check that your original resume is uploaded and saved in Profile.
+                  </div>
+                )}
 
-            <section className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
-              <h2 className="text-lg font-semibold">What changed and why</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Each change includes the career-profile evidence used to support it.
-              </p>
-              <div className="mt-4 space-y-3">
-                {selected.changeLog.map((item, index) => (
-                  <article key={index} className="rounded-xl border border-white/10 p-4">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">{item.section}</div>
-                    <p className="mt-2 text-sm font-medium text-slate-200">{item.change}</p>
-                    <p className="mt-1 text-sm leading-6 text-slate-400">{item.rationale}</p>
-                    {item.source_refs.length > 0 && (
-                      <Evidence refs={item.source_refs} evidence={item.source_evidence} />
-                    )}
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  <article className="min-w-0 rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <div className="mb-5 border-b border-white/10 pb-4">
+                      <div className="text-xs font-semibold tracking-[0.18em] text-slate-400">MASTER RESUME</div>
+                      <h3 className="mt-2 text-xl font-semibold">{masterProfile?.full_name || resume.full_name || "Candidate"}</h3>
+                      <p className="mt-1 text-sm text-slate-400">{masterProfile?.headline || "Original profile headline"}</p>
+                      <p className="mt-2 text-xs text-slate-500">Original profile facts and descriptions</p>
+                    </div>
+
+                    <div className="space-y-6">
+                      <div>
+                        <h4 className="font-semibold">Professional summary</h4>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                          {masterProfile?.professional_summary || "No summary in the saved master profile."}
+                        </p>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Skills</h4>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {(masterProfile?.skills ?? []).map(skill => (
+                            <span key={skill} className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-300">{skill}</span>
+                          ))}
+                          {!masterProfile?.skills?.length && <span className="text-sm text-slate-500">No skills recorded.</span>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Professional experience</h4>
+                        <div className="mt-3 space-y-4">
+                          {(masterProfile?.experience ?? []).map((item, index) => (
+                            <div key={index} className="rounded-xl border border-white/10 p-3">
+                              <div className="font-medium">{item.title || "Role"} · {item.company || "Company not listed"}</div>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {[
+                                  [item.start_date, item.end_date].filter(Boolean).join(" - "),
+                                  item.location
+                                ].filter(Boolean).join(" · ")}
+                              </p>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                                {item.description || "No original description recorded."}
+                              </p>
+                              {!!item.technologies?.length && (
+                                <p className="mt-2 text-xs text-slate-500">Technologies: {item.technologies.join(", ")}</p>
+                              )}
+                            </div>
+                          ))}
+                          {!masterProfile?.experience?.length && <p className="text-sm text-slate-500">No work history recorded.</p>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Projects</h4>
+                        <div className="mt-3 space-y-3">
+                          {(masterProfile?.projects ?? []).map((item, index) => (
+                            <div key={index} className="rounded-xl border border-white/10 p-3">
+                              <div className="font-medium">{item.name || "Project"}</div>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                                {item.description || "No original description recorded."}
+                              </p>
+                              {!!item.technologies?.length && (
+                                <p className="mt-2 text-xs text-slate-500">Technologies: {item.technologies.join(", ")}</p>
+                              )}
+                            </div>
+                          ))}
+                          {!masterProfile?.projects?.length && <p className="text-sm text-slate-500">No projects recorded.</p>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Education</h4>
+                        <div className="mt-2 space-y-2">
+                          {(masterProfile?.education ?? []).map((item, index) => (
+                            <p key={index} className="text-sm leading-6 text-slate-300">
+                              {[item.degree, item.field_of_study, item.institution, item.graduation_year].filter(Boolean).join(" · ")}
+                            </p>
+                          ))}
+                          {!masterProfile?.education?.length && <p className="text-sm text-slate-500">No education recorded.</p>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Certifications</h4>
+                        <div className="mt-2 space-y-1">
+                          {(masterProfile?.certifications ?? []).map((item, index) => (
+                            <p key={index} className="text-sm text-slate-300">{item}</p>
+                          ))}
+                          {!masterProfile?.certifications?.length && <p className="text-sm text-slate-500">No certifications recorded.</p>}
+                        </div>
+                      </div>
+                    </div>
                   </article>
-                ))}
-                {!selected.changeLog.length && <p className="text-sm text-slate-500">No change notes were returned.</p>}
+
+                  <article className="min-w-0 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.035] p-5">
+                    <div className="mb-5 border-b border-white/10 pb-4">
+                      <div className="text-xs font-semibold tracking-[0.18em] text-cyan-200">GENERATED RESUME</div>
+                      <h3 className="mt-2 text-xl font-semibold">{resume.full_name || "Candidate"}</h3>
+                      <p className="mt-1 text-sm font-medium text-cyan-100">{resume.target_headline}</p>
+                      <p className="mt-2 text-xs text-slate-500">Tailored for {selected.jobTitle} at {selected.company}</p>
+                    </div>
+
+                    <div className="space-y-6">
+                      <div>
+                        <h4 className="font-semibold">Professional summary</h4>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{resume.professional_summary}</p>
+                        <Evidence refs={resume.summary_source_refs} evidence={resume.summary_source_evidence} />
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Skills selected for this role</h4>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {resume.skills.map(skill => (
+                            <span key={skill} className="rounded-full bg-cyan-300/10 px-2.5 py-1 text-xs text-cyan-100">{skill}</span>
+                          ))}
+                          {!resume.skills.length && <span className="text-sm text-slate-500">No skills selected.</span>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Professional experience</h4>
+                        <div className="mt-3 space-y-4">
+                          {resume.experience.map(item => (
+                            <div key={item.source_index} className="rounded-xl border border-white/10 p-3">
+                              <div className="font-medium">{item.title} · {item.company}</div>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {[dateRange(item), item.location].filter(Boolean).join(" · ")}
+                              </p>
+                              <div className="mt-3 space-y-3">
+                                {item.bullets.map((bullet, index) => (
+                                  <div key={index}>
+                                    <p className="text-sm leading-6 text-slate-200">{bullet.text}</p>
+                                    <Evidence refs={bullet.source_refs} evidence={bullet.source_evidence} />
+                                  </div>
+                                ))}
+                              </div>
+                              {!!item.technologies.length && (
+                                <p className="mt-2 text-xs text-slate-500">Technologies: {item.technologies.join(", ")}</p>
+                              )}
+                            </div>
+                          ))}
+                          {!resume.experience.length && <p className="text-sm text-slate-500">No experience selected.</p>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Selected projects</h4>
+                        <div className="mt-3 space-y-3">
+                          {resume.projects.map(item => (
+                            <div key={item.source_index} className="rounded-xl border border-white/10 p-3">
+                              <div className="font-medium">{item.name}</div>
+                              <div className="mt-2 space-y-3">
+                                {item.bullets.map((bullet, index) => (
+                                  <div key={index}>
+                                    <p className="text-sm leading-6 text-slate-200">{bullet.text}</p>
+                                    <Evidence refs={bullet.source_refs} evidence={bullet.source_evidence} />
+                                  </div>
+                                ))}
+                              </div>
+                              {!!item.technologies.length && (
+                                <p className="mt-2 text-xs text-slate-500">Technologies: {item.technologies.join(", ")}</p>
+                              )}
+                            </div>
+                          ))}
+                          {!resume.projects.length && <p className="text-sm text-slate-500">No projects selected.</p>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Education</h4>
+                        <div className="mt-2 space-y-2">
+                          {resume.education.map((item, index) => (
+                            <p key={index} className="text-sm leading-6 text-slate-300">
+                              {[item.degree, item.field_of_study, item.institution, item.graduation_year].filter(Boolean).join(" · ")}
+                            </p>
+                          ))}
+                          {!resume.education.length && <p className="text-sm text-slate-500">No education included.</p>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">Certifications</h4>
+                        <div className="mt-2 space-y-1">
+                          {resume.certifications.map((item, index) => (
+                            <p key={index} className="text-sm text-slate-300">{item}</p>
+                          ))}
+                          {!resume.certifications.length && <p className="text-sm text-slate-500">No certifications included.</p>}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
               </div>
+
+              <p className="mt-6 border-t border-white/10 pt-5 text-xs leading-5 text-amber-200">
+                Review before sending. AI wording can still overstate a source fact even when it includes a reference.
+                Check every claim, metric and skill against your actual experience.
+              </p>
             </section>
 
-            <p className="mt-5 text-xs leading-5 text-amber-200">
-              Review before sending. AI wording can still overstate a source fact even when it includes a reference.
-              Check every bullet, metric and skill against your actual experience.
-            </p>
           </>
         )}
 

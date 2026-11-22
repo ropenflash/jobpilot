@@ -66,6 +66,26 @@ def _national_number(phone: str, calling_code: str) -> str:
     return phone.strip()
 
 
+def _resume_upload_score(metadata: dict) -> int:
+    """Score file inputs without confusing resume uploads with cover-letter fields."""
+    label = str(metadata.get("label") or "")
+    name = str(metadata.get("name") or "")
+    element_id = str(metadata.get("id") or "")
+    parent_text = str(metadata.get("parent_text") or "")
+    accept = str(metadata.get("accept") or "")
+    text = " ".join((label, name, element_id, parent_text)).lower()
+
+    if any(term in text for term in (
+        "cover letter", "work sample", "writing sample", "portfolio", "additional document"
+    )) and not re.search(r"\b(resume|cv|curriculum vitae)\b", text):
+        return -1
+    if re.search(r"\b(resume|cv|curriculum vitae)\b", " ".join((label, name, element_id)).lower()):
+        return 100
+    if ".pdf" in accept.lower() or "application/pdf" in accept.lower():
+        return 20
+    return 0
+
+
 def _validate_greenhouse_url(value: str):
     parsed = urlparse(value)
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_GREENHOUSE_HOSTS:
@@ -121,6 +141,7 @@ class BrowserSession:
     missing_required_fields: list[str] = field(default_factory=list)
     message: str | None = None
     automation_notes: list[str] = field(default_factory=list)
+    resume_attached: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -241,6 +262,7 @@ class ApplicationSessionManager:
                 session.status = "NEEDS_USER_INPUT"
                 session.message = "The application form is not currently available in the browser. Finish any page prompt and refresh again."
                 return self._serialize(session)
+            await self._upload_resume(session)
             session.fields = await self._snapshot_fields(session.frame)
             session.missing_required_fields = self._missing_required(session.fields)
             if challenge:
@@ -482,52 +504,128 @@ class ApplicationSessionManager:
         return None
 
     async def _upload_resume(self, session: BrowserSession):
-        file_inputs = session.frame.locator("input[type='file']")
-        candidates = []
-        try:
-            count = await file_inputs.count()
+        if session.resume_attached:
+            return
+
+        # A first pass can happen before Greenhouse finishes rendering its upload
+        # widget. Remove the previous diagnostic so a refresh shows current state.
+        session.automation_notes = [
+            note for note in session.automation_notes
+            if not note.startswith("Resume upload:")
+        ]
+
+        discovered = []
+        for frame in session.page.frames:
+            try:
+                file_inputs = frame.locator("input[type='file']")
+                count = await file_inputs.count()
+            except Exception:
+                continue
+
             for index in range(count):
                 candidate = file_inputs.nth(index)
-                metadata = await candidate.evaluate("""el => {
-                    const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
-                    const parentLabel = el.closest('label')?.innerText || '';
-                    const labelledBy = el.getAttribute('aria-labelledby');
-                    const ariaText = labelledBy
-                      ? labelledBy.split(/\\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ')
-                      : '';
-                    return {
-                      label: (labels.join(' ') || parentLabel || el.getAttribute('aria-label') || ariaText ||
-                              el.getAttribute('placeholder') || '').trim(),
-                      name: el.getAttribute('name') || '',
-                      id: el.id || ''
-                    };
-                }""")
-                if _classify_field(metadata["label"], f'{metadata["name"]} {metadata["id"]}', "file") == "resume":
-                    candidates.append(candidate)
-        except Exception:
-            candidates = []
+                try:
+                    metadata = await candidate.evaluate("""el => {
+                      const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
+                      const parentLabel = el.closest('label')?.innerText || '';
+                      const labelledBy = el.getAttribute('aria-labelledby');
+                      const ariaText = labelledBy
+                        ? labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ')
+                        : '';
+                      const wrapper = el.closest('[data-field], .field, .form-field') ||
+                                      el.parentElement?.parentElement || el.parentElement;
+                      return {
+                        label: (labels.join(' ') || parentLabel || el.getAttribute('aria-label') ||
+                                ariaText || el.getAttribute('placeholder') || '').trim(),
+                        name: el.getAttribute('name') || '',
+                        id: el.id || '',
+                        accept: el.getAttribute('accept') || '',
+                        parent_text: (wrapper?.innerText || '').trim().slice(0, 240)
+                      };
+                    }""")
+                    discovered.append({
+                        "frame": frame,
+                        "locator": candidate,
+                        "metadata": metadata,
+                        "score": _resume_upload_score(metadata),
+                    })
+                except Exception:
+                    continue
 
-        if len(candidates) != 1:
-            reason = (
-                "No clearly labelled resume upload control was detected."
-                if not candidates else
-                "More than one resume upload control was detected."
+        labelled = [item for item in discovered if item["score"] >= 100]
+        pdf_inputs = [item for item in discovered if item["score"] == 20]
+        selected = None
+        selection_reason = ""
+        if len(labelled) == 1:
+            selected = labelled[0]
+            selection_reason = "matched the resume/CV label"
+        elif len(labelled) > 1:
+            session.automation_notes.append(
+                "Resume upload: More than one input is labelled as a resume. Choose the correct one manually in Chromium."
             )
-            session.automation_notes.append(reason + " Attach the tailored PDF manually in Chromium.")
+            return
+        elif len(pdf_inputs) == 1:
+            selected = pdf_inputs[0]
+            selection_reason = "found the only PDF-accepting file input"
+        elif len(pdf_inputs) > 1:
+            session.automation_notes.append(
+                "Resume upload: Multiple PDF file inputs were found without a unique resume label. Attach the tailored PDF manually."
+            )
+            return
+        elif len(discovered) == 1 and discovered[0]["score"] == 0:
+            selected = discovered[0]
+            selection_reason = "found the only file input on the application page"
+        elif not discovered:
+            session.automation_notes.append(
+                "Resume upload: No HTML file input was found in any Greenhouse page frame. The upload widget may not have rendered yet; use Refresh form review to retry or attach the PDF manually."
+            )
+            return
+        else:
+            found = [
+                "label={!r}, name={!r}, id={!r}, accept={!r}".format(
+                    item["metadata"]["label"][:70],
+                    item["metadata"]["name"][:50],
+                    item["metadata"]["id"][:50],
+                    item["metadata"]["accept"][:50],
+                )
+                for item in discovered[:4]
+            ]
+            session.automation_notes.append(
+                "Resume upload: File inputs were found but none could be identified safely as the resume field: "
+                + "; ".join(found)
+                + ". Attach the tailored PDF manually."
+            )
             return
 
         try:
-            await candidates[0].set_input_files(str(session.upload_path))
-            attached = await candidates[0].evaluate("el => Boolean(el.files && el.files.length)")
-            if attached:
-                session.automation_notes.append("Tailored PDF attached to the resume upload control.")
+            already_attached = await selected["locator"].evaluate(
+                "el => Boolean(el.files && el.files.length)"
+            )
+            if already_attached:
+                session.resume_attached = True
+                session.automation_notes.append(
+                    "Resume upload: A file is already present in the selected upload field; JobPilot left it unchanged."
+                )
+                return
+
+            await selected["locator"].set_input_files(str(session.upload_path))
+            uploaded = await selected["locator"].evaluate("""el => {
+              const file = el.files && el.files.length ? el.files[0] : null;
+              return file ? {name: file.name, size: file.size} : null;
+            }""")
+            if uploaded and uploaded["size"] > 0:
+                session.resume_attached = True
+                session.automation_notes.append(
+                    f"Resume upload: Attached {uploaded['name']} ({uploaded['size']} bytes); {selection_reason}."
+                )
             else:
                 session.automation_notes.append(
-                    "The resume upload control did not confirm the attachment; check it manually in Chromium."
+                    "Resume upload: The browser accepted the file-selection call but the input still reports no selected file. Attach the PDF manually."
                 )
-        except Exception:
+        except Exception as exc:
             session.automation_notes.append(
-                "Could not attach the tailored PDF automatically; attach it manually in Chromium."
+                "Resume upload: Playwright could not set the file on the selected input "
+                f"({type(exc).__name__}). Attach the PDF manually and share the worker log if this repeats."
             )
 
     def _missing_required(self, fields: list[dict]) -> list[str]:
