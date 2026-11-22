@@ -134,6 +134,7 @@ public class ApplicationController {
         workerRequest.put("career_profile", profile.getExtracted());
         workerRequest.put("tailored_resume_base64", Base64.getEncoder().encodeToString(resumeBytes));
         workerRequest.put("tailored_resume_filename", "tailored-resume." + format);
+        workerRequest.put("tailored_resume", tailored.getResume() == null ? Map.of() : tailored.getResume());
 
         try {
             Map<String, Object> workerResult = workerClient.post()
