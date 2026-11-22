@@ -41,8 +41,8 @@ def _profile_for_matching(profile: dict) -> dict:
 def _extract_json(raw: str) -> dict:
     text = raw.strip()
     if text.startswith("```"):
-        text = re.sub(r"^\`\`\`(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*\`\`\`$", "", text)
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
     try:
         value = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -68,19 +68,31 @@ def _score_evidence(evidence: list[MatchEvidence]) -> tuple[int, list[ScoreBreak
 
     active_weight_total = sum(CATEGORY_WEIGHTS[category] for category in active_categories)
     weighted_score = 0.0
-    breakdown: list[ScoreBreakdown] = []
+    raw_weights = {
+        category: CATEGORY_WEIGHTS[category] / active_weight_total * 100
+        for category in active_categories
+    }
+    # Largest-remainder allocation makes displayed weight percentages total exactly 100.
+    normalized_weights = {
+        category: int(raw_weights[category]) for category in active_categories
+    }
+    remaining = 100 - sum(normalized_weights.values())
+    for category in sorted(
+        active_categories,
+        key=lambda item: raw_weights[item] - normalized_weights[item],
+        reverse=True,
+    )[:remaining]:
+        normalized_weights[category] += 1
 
+    breakdown: list[ScoreBreakdown] = []
     for category in active_categories:
         values = grouped[category]
         category_score = round((sum(values) / len(values)) * 100)
-        normalized_weight = round(
-            CATEGORY_WEIGHTS[category] / active_weight_total * 100
-        )
         weighted_score += category_score * CATEGORY_WEIGHTS[category]
         breakdown.append(
             ScoreBreakdown(
                 category=category,
-                weight_percentage=normalized_weight,
+                weight_percentage=normalized_weights[category],
                 category_score=category_score,
                 evidence_count=len(values),
             )

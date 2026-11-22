@@ -39,10 +39,11 @@ class _HTMLTextExtractor(HTMLParser):
 
     def handle_data(self, data: str):
         if self.skip_depth == 0 and data.strip():
-            self.parts.append(data.strip())
+            self.parts.append(data.strip() + " ")
 
     def text(self) -> str:
-        lines = [" ".join(part.split()) for part in self.parts]
+        raw = "".join(self.parts)
+        lines = [" ".join(line.split()) for line in raw.splitlines()]
         return "\n".join(line for line in lines if line).strip()
 
 
@@ -51,12 +52,17 @@ def parse_greenhouse_job_url(url: str) -> tuple[str, int]:
     host = (parsed.hostname or "").lower()
 
     # Exact host allow-list and a strict path pattern prevent arbitrary URL fetches.
+    try:
+        has_custom_port = parsed.port is not None
+    except ValueError:
+        has_custom_port = True
+
     if (
         parsed.scheme.lower() != "https"
         or host not in ALLOWED_HOSTS
         or parsed.username
         or parsed.password
-        or parsed.port is not None
+        or has_custom_port
     ):
         raise HTTPException(
             status_code=422,

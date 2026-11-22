@@ -1,6 +1,14 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _as_string_list(value: Any) -> Any:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    return value
 
 
 class GreenhouseJob(BaseModel):
@@ -24,6 +32,11 @@ class JobRequirements(BaseModel):
     maximum_experience_years: float | None = None
     employment_type: str | None = None
     salary_range: str | None = None
+
+    @field_validator("responsibilities", "required_skills", "preferred_skills", "qualifications", mode="before")
+    @classmethod
+    def normalize_lists(cls, value: Any) -> Any:
+        return _as_string_list(value)
 
 
 class MatchEvidence(BaseModel):
@@ -53,6 +66,11 @@ class JobMatch(BaseModel):
     evidence: list[MatchEvidence] = Field(default_factory=list)
     score_breakdown: list[ScoreBreakdown] = Field(default_factory=list)
     rationale: str
+
+    @field_validator("strengths", "gaps", mode="before")
+    @classmethod
+    def normalize_lists(cls, value: Any) -> Any:
+        return _as_string_list(value)
 
 
 class JobAnalysisResponse(BaseModel):
