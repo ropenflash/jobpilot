@@ -662,7 +662,7 @@ class ApplicationSessionManager:
         session.question_review = await review_application_questions(
             session.fields,
             session.career_profile,
-            session.tailored_resume,
+            getattr(session, "tailored_resume", {}),
         )
         if session.question_review.get("status") == "unavailable":
             self._add_note(
