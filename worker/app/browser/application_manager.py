@@ -469,8 +469,9 @@ class ApplicationSessionManager:
                 continue
 
     def _apply_manual_field_labels(self, session: BrowserSession):
+        manual_field_labels = getattr(session, "manual_field_labels", {})
         for item in session.fields:
-            custom_label = session.manual_field_labels.get(int(item.get("index", -1)))
+            custom_label = manual_field_labels.get(int(item.get("index", -1)))
             if custom_label:
                 item["label"] = custom_label
                 item["classification"] = _classify_field(custom_label, item.get("name", ""), item.get("type", ""))
