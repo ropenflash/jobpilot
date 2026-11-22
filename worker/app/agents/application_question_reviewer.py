@@ -138,6 +138,19 @@ def normalize_review(
         if field_index in allowed_indices:
             returned[field_index] = item
 
+    profile_recommendations = {}
+    for recommendation in parsed.get("profile_improvements", []):
+        if not isinstance(recommendation, dict):
+            continue
+        try:
+            recommendation_index = int(recommendation.get("field_index"))
+        except (TypeError, ValueError):
+            continue
+        if recommendation_index in allowed_indices:
+            text = _clean(recommendation.get("recommendation"))
+            if text:
+                profile_recommendations[recommendation_index] = text
+
     reviews = []
     improvements = []
     for question in questions:
@@ -183,7 +196,11 @@ def normalize_review(
         if status != "supported":
             suggested_answer = None
 
-        profile_improvement = _clean(item.get("profile_improvement")) or None
+        profile_improvement = (
+            _clean(item.get("profile_improvement"))
+            or profile_recommendations.get(question["field_index"])
+            or None
+        )
         if status == "not_found" and not profile_improvement:
             profile_improvement = (
                 "If this experience or qualification is accurate, add a specific example and your role in it "
@@ -338,7 +355,7 @@ async def review_application_questions(
             item["evidence_status"] == "manual_review" for item in ordered
         )
         return normalized
-    except (VertexError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+    except Exception as exc:
         fallback_reviews = []
         for question in questions:
             sensitive_match = next(
