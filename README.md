@@ -38,6 +38,7 @@ cd worker
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install chromium
 
 gcloud auth application-default login
 export GCP_PROJECT="agentos-514612"
@@ -108,7 +109,7 @@ Scanned/image-only PDFs are not supported yet; OCR is a future enhancement. AI e
 5. The worker validates the exact Greenhouse host and URL path, calls the public Greenhouse Job Board API with content=true, and opens the same posting in headless Chromium to capture up to four overlapping viewport screenshots.
 6. The worker sends the API description, rendered-page headings/text and screenshots to Gemini on Vertex AI in one multimodal request. Gemini extracts role requirements, compares them with the career profile and returns additional job-relevant visual findings. Screenshots are held in memory for the request and are not saved to disk.
 7. The worker returns requirement-level evidence plus visual-inspection status, screenshot count and visual findings. If Chromium is unavailable, JobPilot records that visual inspection was unavailable and continues with API text only. The application calculates a deterministic score: required skills 40%, experience/responsibilities 30%, project evidence 20%, and preferred skills 10%. Categories absent from the comparison are excluded and the remaining weights are normalized to total 100%.
-8. Spring Boot saves the job, requirements, score and evidence in MongoDB's \`jobs\` collection. The same Greenhouse board token and job ID update the existing record rather than creating duplicates.
+8. Spring Boot saves the job, requirements, match evidence and visual-inspection summary in MongoDB's jobs collection. The same Greenhouse board token and job ID update the existing record rather than creating duplicates.
 9. Review the score breakdown, matched evidence and gaps in the Jobs page. The score is a profile-evidence estimate, not a prediction of hiring success.
 
 ## Milestone 4: Job-specific resume tailoring
