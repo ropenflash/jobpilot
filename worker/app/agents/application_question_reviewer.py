@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 from app.services.vertex_client import VertexError, generate_text
+from app.agents.application_answer_resolver import resolve_structured_question
 
 
 MAX_QUESTIONS = 25
@@ -14,6 +15,17 @@ def _clean(value: Any) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", str(value)).strip()
+
+
+PRIVATE_PROFILE_KEYS = {
+    "phone", "mobile", "phone_number", "email", "full_name",
+    "city", "location", "location_city", "linkedin_url", "linkedin",
+    "github_url", "github", "website", "portfolio_url",
+    "official_notice_period", "notice_period", "notice_period_days",
+    "currently_serving_notice", "serving_notice",
+    "official_last_working_day", "last_working_day", "join_availability", "availability_to_join",
+    "current_ctc_lpa", "expected_ctc_lpa", "ctc_currency",
+}
 
 
 def _flatten_evidence(value: Any, source: str, path: str, output: list[dict]):
@@ -34,7 +46,8 @@ def _flatten_evidence(value: Any, source: str, path: str, output: list[dict]):
                 return
         return
     text = _clean(value)
-    if len(text) < 2:
+    # Single-digit numeric values are valid evidence, e.g. one year of experience.
+    if len(text) < 2 and not text.isdigit():
         return
     output.append({
         "id": f"{source}:{path or 'root'}",
@@ -219,6 +232,9 @@ def normalize_review(
                 "but only where those details are accurate."
             )
 
+        needs_profile_update = (
+            question["required"] and status in {"partial", "not_found"} and bool(profile_improvement)
+        )
         reviews.append({
             "field_index": question["field_index"],
             "question": question["question"],
@@ -228,6 +244,9 @@ def normalize_review(
             "evidence": linked_evidence,
             "suggested_answer": suggested_answer,
             "profile_improvement": profile_improvement,
+            "needs_profile_update": needs_profile_update,
+            "profile_fields_needed": ["experience_or_projects"] if needs_profile_update else [],
+            "answer_basis": "verified profile/resume evidence" if status == "supported" else None,
         })
 
         if profile_improvement:
@@ -279,24 +298,56 @@ async def review_application_questions(
         for question in questions
         if question["classification"] in {"sensitive_or_eligibility", "checkbox_review"}
     ]
+    structured = {}
+    for question in questions:
+        resolved = resolve_structured_question(question, career_profile, evidence)
+        if resolved is not None:
+            structured[question["field_index"]] = resolved
+        elif question["classification"] == "unlabelled_field":
+            structured[question["field_index"]] = resolve_structured_question(
+                {**question, "classification": "unlabelled_field"}, career_profile, evidence
+            ) or _manual_review(
+                question,
+                "The employer form exposes a control without a readable label. Inspect it in Chromium; JobPilot cannot determine the question from the available markup.",
+            )
     reviewable = [
         question for question in questions
         if question["classification"] not in {"sensitive_or_eligibility", "checkbox_review"}
-        and question["question"].lower() != "unlabelled field"
+        and question["field_index"] not in structured
     ]
 
     if not reviewable or not evidence:
+        direct_and_sensitive = {**structured}
+        for item in sensitive:
+            direct_and_sensitive[item["field_index"]] = item
+        ordered = [
+            direct_and_sensitive[question["field_index"]]
+            for question in questions
+            if question["field_index"] in direct_and_sensitive
+        ]
         base = {
             "status": "completed",
             "questions_reviewed": len(questions),
-            "supported_count": 0,
-            "partial_count": 0,
-            "not_found_count": 0,
-            "manual_review_count": len(sensitive),
-            "reviews": sensitive,
+            "supported_count": sum(item["evidence_status"] == "supported" for item in ordered),
+            "partial_count": sum(item["evidence_status"] == "partial" for item in ordered),
+            "not_found_count": sum(item["evidence_status"] == "not_found" for item in ordered),
+            "manual_review_count": sum(item["evidence_status"] == "manual_review" for item in ordered),
+            "profile_update_required_count": sum(bool(item.get("needs_profile_update")) for item in ordered),
+            "profile_update_requests": [
+                {
+                    "field_index": item["field_index"],
+                    "question": item["question"],
+                    "fields_needed": item.get("profile_fields_needed", []),
+                    "recommendation": item.get("profile_improvement"),
+                    "priority": "high",
+                }
+                for item in ordered if item.get("needs_profile_update")
+            ],
+            "reviews": ordered,
             "profile_improvements": [],
         }
         for question in reviewable:
+            recommendation = "Complete the relevant experience, project, skills or education details in your career profile before answering this question."
             base["reviews"].append({
                 "field_index": question["field_index"],
                 "question": question["question"],
@@ -305,11 +356,29 @@ async def review_application_questions(
                 "reason": "No usable resume/profile evidence was available to support an answer.",
                 "evidence": [],
                 "suggested_answer": None,
-                "profile_improvement": "Complete the relevant experience, project, skills or education details in your career profile before answering this question.",
+                "profile_improvement": recommendation,
+                "needs_profile_update": bool(question["required"]),
+                "profile_fields_needed": ["experience_or_projects"] if question["required"] else [],
+                "answer_basis": None,
             })
             base["not_found_count"] += 1
+            base["profile_update_required_count"] += 1
+            base["profile_update_requests"].append({
+                "field_index": question["field_index"],
+                "question": question["question"],
+                "fields_needed": ["experience_or_projects"],
+                "recommendation": recommendation,
+                "priority": "high",
+            })
         return base
 
+    ai_evidence = [
+        item for item in evidence
+        if not (
+            item["source"] == "verified_profile"
+            and item["path"].split(".", 1)[0].split("[", 1)[0].lower() in PRIVATE_PROFILE_KEYS
+        )
+    ]
     prompt = {
         "instructions": [
             "Assess each application question only against the supplied verified profile and tailored-resume evidence.",
@@ -324,7 +393,7 @@ async def review_application_questions(
             "Each profile_improvements item must contain field_index and recommendation. Only refer to information the candidate can truthfully add if it is accurate.",
         ],
         "questions": reviewable,
-        "evidence": evidence,
+        "evidence": ai_evidence,
     }
     messages = [
         {
@@ -339,8 +408,10 @@ async def review_application_questions(
     ]
     try:
         raw = await generate_text(messages, json_mode=True, max_output_tokens=5500)
-        normalized = normalize_review(_parse_json(raw), reviewable, evidence)
+        normalized = normalize_review(_parse_json(raw), reviewable, ai_evidence)
         by_index = {item["field_index"]: item for item in normalized["reviews"]}
+        for item in structured.values():
+            by_index[item["field_index"]] = item
         for item in sensitive:
             by_index[item["field_index"]] = item
         for question in questions:
@@ -361,15 +432,33 @@ async def review_application_questions(
         normalized["manual_review_count"] = sum(
             item["evidence_status"] == "manual_review" for item in ordered
         )
+        normalized["profile_update_required_count"] = sum(
+            bool(item.get("needs_profile_update")) for item in ordered
+        )
+        normalized["profile_update_requests"] = [
+            {
+                "field_index": item["field_index"],
+                "question": item["question"],
+                "fields_needed": item.get("profile_fields_needed", []),
+                "recommendation": item.get("profile_improvement"),
+                "priority": "high" if any(field in {
+                    "phone", "city", "java_experience_years", "spring_boot_experience_years",
+                    "microservices_experience_years", "kafka_experience_years", "gcp_experience_years",
+                    "official_notice_period", "currently_serving_notice", "official_last_working_day",
+                    "join_availability", "current_ctc_lpa", "expected_ctc_lpa",
+                } for field in item.get("profile_fields_needed", [])) else "medium",
+            }
+            for item in ordered if item.get("needs_profile_update")
+        ]
         return normalized
     except Exception as exc:
-        fallback_reviews = []
+        by_index = {}
         for question in questions:
             sensitive_match = next(
                 (item for item in sensitive if item["field_index"] == question["field_index"]),
                 None,
             )
-            fallback_reviews.append(sensitive_match or {
+            by_index[question["field_index"]] = sensitive_match or {
                 "field_index": question["field_index"],
                 "question": question["question"],
                 "category": "unknown",
@@ -378,14 +467,34 @@ async def review_application_questions(
                 "evidence": [],
                 "suggested_answer": None,
                 "profile_improvement": None,
-            })
+                "needs_profile_update": False,
+                "profile_fields_needed": [],
+                "answer_basis": None,
+            }
+        # Deterministic profile answers must survive an AI outage.
+        for item in structured.values():
+            by_index[item["field_index"]] = item
+        for item in sensitive:
+            by_index[item["field_index"]] = item
+        fallback_reviews = [by_index[question["field_index"]] for question in questions]
         return {
             "status": "unavailable",
             "questions_reviewed": len(questions),
-            "supported_count": 0,
-            "partial_count": 0,
-            "not_found_count": 0,
-            "manual_review_count": len(sensitive),
+            "supported_count": sum(item["evidence_status"] == "supported" for item in fallback_reviews),
+            "partial_count": sum(item["evidence_status"] == "partial" for item in fallback_reviews),
+            "not_found_count": sum(item["evidence_status"] == "not_found" for item in fallback_reviews),
+            "manual_review_count": sum(item["evidence_status"] == "manual_review" for item in fallback_reviews),
+            "profile_update_required_count": sum(bool(item.get("needs_profile_update")) for item in fallback_reviews),
+            "profile_update_requests": [
+                {
+                    "field_index": item["field_index"],
+                    "question": item["question"],
+                    "fields_needed": item.get("profile_fields_needed", []),
+                    "recommendation": item.get("profile_improvement"),
+                    "priority": "high",
+                }
+                for item in fallback_reviews if item.get("needs_profile_update")
+            ],
             "reviews": fallback_reviews,
             "profile_improvements": [],
             "message": str(exc)[:300],

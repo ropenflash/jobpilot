@@ -53,6 +53,24 @@ class ApplicationAutomationTests(unittest.TestCase):
             "sensitive_or_eligibility",
         )
 
+    def test_application_question_classifier_identifies_structured_profile_fields(self):
+        cases = [
+            ("Phone", "text", "phone"),
+            ("Location (City)", "text", "city"),
+            ("Unlabelled field", "text", "unlabelled_field"),
+            ("How many years of experience you have in Java development?", "text", "years_java"),
+            ("What is your official notice period? If you are serving notice, mention official last working day.", "text", "notice_period"),
+            ("How soon can you join us?", "text", "join_availability"),
+            ("How many years of experience in Springboot, Microservices?", "select", "years_spring_boot_microservices"),
+            ("How many years of experience working with Kafka?", "text", "years_kafka"),
+            ("How many years of experience working with GCP?", "text", "years_gcp"),
+            ("Current CTC?", "text", "current_ctc"),
+            ("Expected CTC?", "text", "expected_ctc"),
+        ]
+        for label, input_type, expected in cases:
+            with self.subTest(label=label):
+                self.assertEqual(_classify_field(label, label, input_type), expected)
+
     def test_cover_letter_is_not_mistaken_for_resume(self):
         self.assertEqual(_classify_field("Cover letter", "cover_letter", "file"), "manual")
 
@@ -118,6 +136,48 @@ class ApplicationAutomationTests(unittest.TestCase):
         approximate = ApplicationSessionManager()._profile_values({"total_experience_years": "11+ years"})
         self.assertEqual(approximate["experience_years"], 11.0)
         self.assertEqual(values["linkedin"], "https://www.linkedin.com/in/example")
+
+    def test_profile_values_prepare_the_new_application_answer_fields(self):
+        values = ApplicationSessionManager()._profile_values({
+            "java_experience_years": 8,
+            "spring_boot_experience_years": 6,
+            "microservices_experience_years": 5,
+            "kafka_experience_years": 4,
+            "gcp_experience_years": 3,
+            "official_notice_period": "60 days",
+            "currently_serving_notice": "yes",
+            "official_last_working_day": "2026-12-31",
+            "join_availability": "From 2027-01-01",
+            "current_ctc_lpa": 47,
+            "expected_ctc_lpa": 65,
+            "ctc_currency": "INR",
+        })
+        self.assertEqual(values["years_java"], "8")
+        self.assertEqual(values["years_spring_boot_microservices"], "Spring Boot: 6 years; Microservices: 5 years")
+        self.assertEqual(values["years_kafka"], "4")
+        self.assertEqual(values["years_gcp"], "3")
+        self.assertIn("Official notice period: 60 days", values["notice_period_answer"])
+        self.assertIn("Official last working day: 2026-12-31", values["notice_period_answer"])
+        self.assertEqual(values["last_working_day"], "2026-12-31")
+        self.assertEqual(values["join_availability"], "From 2027-01-01")
+        self.assertEqual(values["current_ctc"], "INR 47 LPA")
+        self.assertEqual(values["expected_ctc_numeric"], "65")
+
+    def test_compound_notice_answer_stays_blank_until_serving_status_and_lwd_are_known(self):
+        manager = ApplicationSessionManager()
+        incomplete = manager._profile_values({
+            "official_notice_period": "90 days",
+            "currently_serving_notice": "yes",
+        })
+        self.assertEqual(incomplete["notice_period_answer"], "")
+        self.assertEqual(incomplete["last_working_day_answer"], "")
+
+        not_serving = manager._profile_values({
+            "official_notice_period": "60 days",
+            "currently_serving_notice": "no",
+        })
+        self.assertIn("Currently serving notice: no", not_serving["notice_period_answer"])
+        self.assertEqual(not_serving["last_working_day_answer"], "Not currently serving notice.")
 
     def test_does_not_guess_country_code_from_local_number(self):
         options = [{"value": "+91", "text": "India (+91)"}]
