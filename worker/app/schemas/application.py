@@ -13,6 +13,7 @@ class PrepareApplicationRequest(BaseModel):
 class RefreshApplicationRequest(BaseModel):
     career_profile: dict | None = None
     tailored_resume: dict | None = None
+    manual_answer: dict | None = None
 
 
 class SubmitApplicationRequest(BaseModel):
