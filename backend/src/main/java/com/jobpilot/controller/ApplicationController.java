@@ -204,7 +204,10 @@ public class ApplicationController {
 
         if (request != null && request.get("manualAnswer") instanceof Map<?, ?> supplied) {
             Map<String, Object> manualAnswer = new LinkedHashMap<>();
-            supplied.forEach((key, value) -> manualAnswer.put(String.valueOf(key), value));
+            manualAnswer.put("field_index",
+                supplied.containsKey("fieldIndex") ? supplied.get("fieldIndex") : supplied.get("field_index"));
+            manualAnswer.put("question", supplied.get("question"));
+            manualAnswer.put("answer", supplied.get("answer"));
             refreshRequest.put("manual_answer", manualAnswer);
         }
 
