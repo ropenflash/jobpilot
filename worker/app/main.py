@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 
 import fitz
@@ -19,6 +20,7 @@ from app.schemas.application import (
     SubmitApplicationRequest,
 )
 from app.services.greenhouse import fetch_greenhouse_job
+from app.services.job_page_inspector import inspect_greenhouse_job_page
 from app.services.vertex_client import (
     VertexError,
     credentials_available,
@@ -29,11 +31,12 @@ from app.services.vertex_client import (
 )
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="JobPilot Worker",
     version="0.6.0",
-    description="AI resume intelligence and visible, human-approved Greenhouse application automation."
+    description="AI resume intelligence and human-in-the-loop Greenhouse job and application analysis."
 )
 
 
@@ -150,7 +153,26 @@ async def parse_resume(file: UploadFile = File(...)):
 @app.post("/jobs/analyze", response_model=JobAnalysisResponse)
 async def analyze_job(request: AnalyzeJobRequest):
     job_data = await fetch_greenhouse_job(str(request.url))
-    return await analyze_and_match(job_data, request.career_profile)
+    try:
+        page_inspection = await inspect_greenhouse_job_page(str(request.url))
+    except Exception:
+        logger.warning(
+            "Visual inspection failed for Greenhouse job URL; continuing with API text only.",
+            exc_info=True,
+        )
+        page_inspection = {
+            "status": "unavailable",
+            "screenshots": [],
+            "page_title": None,
+            "page_headings": [],
+            "rendered_text": "",
+            "note": (
+                "Visual inspection was unavailable. The job was analyzed using the Greenhouse "
+                "API description only. Install Chromium with python -m playwright install chromium "
+                "to enable screenshots."
+            ),
+        }
+    return await analyze_and_match(job_data, request.career_profile, page_inspection)
 
 
 @app.post("/resumes/tailor")
@@ -225,4 +247,3 @@ async def cancel_application(session_id: str):
         return await application_sessions.cancel(session_id)
     except ApplicationAutomationError as exc:
         raise _application_error(exc) from exc
-
