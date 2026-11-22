@@ -541,12 +541,12 @@ class ApplicationSessionManager:
 
             control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
             try:
-                if classification in {"country", "experience_range"} and input_type == "select":
+                if classification in {"country", "city", "experience_range"} and input_type == "select":
                     options = await control.locator("option").evaluate_all(
                         "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
                     )
-                    if classification == "country":
-                        desired = values.get("country", "")
+                    if classification in {"country", "city"}:
+                        desired = values.get(classification, "")
                         normalized = re.sub(r"[^a-z0-9]", "", desired.lower())
                         matches = [
                             option for option in options
@@ -563,10 +563,10 @@ class ApplicationSessionManager:
                     if len(matches) == 1:
                         await control.select_option(value=matches[0]["value"])
                         filled_count += 1
-                    elif classification == "country" and desired:
+                    elif classification in {"country", "city"} and desired:
                         self._add_note(
                             session,
-                            f"Country: no exact Greenhouse option matched the verified profile value {desired!r}; choose it manually."
+                            f"{classification.title()}: no exact Greenhouse option matched the verified profile value {desired!r}; choose it manually."
                         )
                     continue
 
