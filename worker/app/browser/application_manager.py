@@ -165,6 +165,10 @@ class ApplicationSessionManager:
         session = self._get_session(session_id)
         async with session.lock:
             await self._touch(session)
+            if session.status in {"SUBMITTED", "SUBMISSION_UNKNOWN", "SUBMITTING"}:
+                raise ApplicationAutomationError(
+                    "A submission has already been attempted for this session. Check Greenhouse and your email before taking any further action."
+                )
             frame = await self._find_application_frame(session.page)
             if frame is None:
                 session.status = "NEEDS_USER_INPUT"
@@ -179,6 +183,8 @@ class ApplicationSessionManager:
         session = self._get_session(session_id)
         async with session.lock:
             await self._touch(session)
+            if session.status in {"SUBMITTED", "SUBMISSION_UNKNOWN", "SUBMITTING"}:
+                return self._serialize(session)
             frame = await self._find_application_frame(session.page)
             challenge = await self._has_challenge(session.page)
             if frame is not None:
