@@ -355,7 +355,7 @@ export default function ApplyPage() {
                         <div key={result.pass} className="rounded-lg border border-white/10 bg-slate-950/40 p-3 text-xs text-slate-300">
                           <div className="font-semibold">Pass {result.pass}</div>
                           <div className="mt-1">{result.fields_checked} controls checked</div>
-                          <div>{result.safe_fills} verified values filled</div>
+                          <div>{result.safe_fills} safe fill actions</div>
                           <div>{result.required_fields_remaining} required remaining</div>
                         </div>
                       ))}
