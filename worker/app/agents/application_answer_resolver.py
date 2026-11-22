@@ -363,6 +363,14 @@ def _resolve_profile_question(question: dict, profile: dict, evidence: list[dict
             return _make_result(
                 question, status="partial" if notice or serving else "not_found",
                 reason="Notice-period details are incomplete. JobPilot needs your official notice period and whether you are currently serving it.",
+                answer=(
+                    f"Official notice period: {notice}. Currently serving notice: {serving}."
+                    if notice and serving else None
+                ),
+                evidence_refs=[
+                    f"verified_profile:{notice_key}" if notice_key else "",
+                    f"verified_profile:{serving_key}" if serving_key else "",
+                ],
                 evidence=evidence,
                 missing_fields=missing,
                 profile_improvement="Complete these profile fields: " + ", ".join(labels) + ".",
@@ -414,7 +422,8 @@ def _resolve_profile_question(question: dict, profile: dict, evidence: list[dict
         if serving.lower() in {"yes", "true", "1", "serving"} and last_day:
             return _make_result(
                 question, status="partial",
-                reason="Your recorded last working day is available, but confirm your actual joining availability and any release or handover constraints.",
+                reason="Your recorded last working day is available. The date is a lower bound; confirm the actual joining date and any release or handover constraints.",
+                answer=f"After official last working day ({last_day}), subject to release formalities.",
                 evidence_refs=[f"verified_profile:{serving_key}", f"verified_profile:{last_day_key}"],
                 evidence=evidence,
                 missing_fields=["join_availability"],
