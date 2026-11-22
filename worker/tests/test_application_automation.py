@@ -163,6 +163,22 @@ class ApplicationAutomationTests(unittest.TestCase):
         self.assertEqual(values["current_ctc"], "INR 47 LPA")
         self.assertEqual(values["expected_ctc_numeric"], "65")
 
+    def test_compound_notice_answer_stays_blank_until_serving_status_and_lwd_are_known(self):
+        manager = ApplicationSessionManager()
+        incomplete = manager._profile_values({
+            "official_notice_period": "90 days",
+            "currently_serving_notice": "yes",
+        })
+        self.assertEqual(incomplete["notice_period_answer"], "")
+        self.assertEqual(incomplete["last_working_day_answer"], "")
+
+        not_serving = manager._profile_values({
+            "official_notice_period": "60 days",
+            "currently_serving_notice": "no",
+        })
+        self.assertIn("Currently serving notice: no", not_serving["notice_period_answer"])
+        self.assertEqual(not_serving["last_working_day_answer"], "Not currently serving notice.")
+
     def test_does_not_guess_country_code_from_local_number(self):
         options = [{"value": "+91", "text": "India (+91)"}]
         self.assertIsNone(_match_country_code_option(options, "9876543210"))
