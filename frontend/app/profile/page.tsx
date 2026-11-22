@@ -230,6 +230,34 @@ export default function ProfilePage() {
           </div>
         </section>}
 
+        {profile && Array.isArray(profile.application_answers) && profile.application_answers.length > 0 && (
+          <section className="mt-8 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.035] p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Saved answers for future applications</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-400">
+                  These are answers you explicitly saved from job application forms. JobPilot can reuse them when a future question matches.
+                </p>
+              </div>
+              <span className="rounded-full border border-cyan-300/20 px-3 py-1 text-xs text-cyan-200">
+                {profile.application_answers.length} saved
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {profile.application_answers.slice().reverse().map((item: any, index: number) => (
+                <article key={item.id ?? index} className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
+                  <div className="text-sm font-semibold text-slate-100">{item.question}</div>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{item.answer}</p>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    {item.classification === "manual" ? "Exact-question match" : "Reusable question category"}
+                    {item.updated_at ? " · Saved " + new Date(item.updated_at).toLocaleDateString() : ""}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
         {profile && <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Extracted information</h2>
