@@ -567,7 +567,8 @@ class ApplicationSessionManager:
             ? Boolean(el.checked || el.getAttribute('aria-checked') === 'true') : null;
           return { index, name: el.getAttribute('name') || '', id: el.id || '',
                    label: label.slice(0, 180), type, required, filled, checked, options,
-                   min: el.getAttribute('min'), max: el.getAttribute('max'), pattern: el.getAttribute('pattern') };
+                   min: el.getAttribute('min'), max: el.getAttribute('max'), pattern: el.getAttribute('pattern'),
+                   minLength: el.getAttribute('minlength'), maxLength: el.getAttribute('maxlength') };
         })""")
         seen_radio_groups = {}
         fields = []
@@ -820,6 +821,9 @@ class ApplicationSessionManager:
             if classification in {
                 "sensitive_or_eligibility", "checkbox_review", "phone_country_code", "unlabelled_field"
             } or input_type in {"file", "checkbox", "radio", "button", "div", "span", "hidden"}:
+                previous = session.answer_decisions.get(field_index)
+                if classification == "phone_country_code" and previous and previous.get("action") == "autofill" and previous.get("applied"):
+                    continue
                 decision = decide_application_answer(
                     item, None, None, session.career_profile, session.tailored_resume
                 )
