@@ -18,7 +18,9 @@ def _clean(value: Any) -> str:
 
 
 PRIVATE_PROFILE_KEYS = {
-    "phone", "mobile", "phone_number", "email",
+    "phone", "mobile", "phone_number", "email", "full_name",
+    "city", "location", "location_city", "linkedin_url", "linkedin",
+    "github_url", "github", "website", "portfolio_url",
     "official_notice_period", "notice_period", "notice_period_days",
     "currently_serving_notice", "serving_notice",
     "official_last_working_day", "last_working_day", "join_availability", "availability_to_join",
