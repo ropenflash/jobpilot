@@ -245,6 +245,7 @@ export default function ApplyPage() {
     }
 
     setSavingAnswerFor(review.field_index);
+    setWorking(true);
     setError("");
     setNotice("");
     try {
@@ -288,6 +289,7 @@ export default function ApplyPage() {
       setError(err instanceof Error ? err.message : "Could not save this application answer.");
     } finally {
       setSavingAnswerFor(null);
+      setWorking(false);
     }
   }
 
