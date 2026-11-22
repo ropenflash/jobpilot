@@ -304,7 +304,7 @@ class ApplicationSessionManager:
           const type = (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
           const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
           const labelledBy = el.getAttribute('aria-labelledby');
-          const ariaText = labelledBy ? labelledBy.split(/\\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ') : '';
+          const ariaText = labelledBy ? labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ') : '';
           const label = (labels.join(' ') || el.getAttribute('aria-label') || ariaText ||
                          el.getAttribute('placeholder') || el.getAttribute('name') || el.id || 'Unlabelled field').trim();
           const required = Boolean(el.required || el.getAttribute('aria-required') === 'true');
