@@ -1,6 +1,4 @@
 import os
-from urllib.parse import urlparse
-
 from playwright.async_api import async_playwright
 
 from app.services.greenhouse import parse_greenhouse_job_url
