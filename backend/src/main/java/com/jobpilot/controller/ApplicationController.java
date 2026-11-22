@@ -184,7 +184,26 @@ public class ApplicationController {
     @PostMapping("/applications/{id}/refresh")
     public Map<String, Object> refresh(@PathVariable String id) {
         ApplicationRecord record = findOrThrow(id);
-        Map<String, Object> result = callWorker("/applications/" + record.getBrowserSessionId() + "/refresh", Map.of());
+
+        CareerProfile profile = mongo.findById("default", CareerProfile.class);
+        if (profile == null || !profile.isVerified()
+                || profile.getExtracted() == null || profile.getExtracted().isEmpty()) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Save and verify your updated career profile before refreshing application answers."
+            );
+        }
+
+        TailoredResumeRecord tailored = mongo.findById(record.getTailoredResumeId(), TailoredResumeRecord.class);
+        Map<String, Object> refreshRequest = new LinkedHashMap<>();
+        refreshRequest.put("career_profile", profile.getExtracted());
+        refreshRequest.put("tailored_resume",
+            tailored == null || tailored.getResume() == null ? Map.of() : tailored.getResume());
+
+        Map<String, Object> result = callWorker(
+            "/applications/" + record.getBrowserSessionId() + "/refresh",
+            refreshRequest
+        );
         applyWorkerResult(record, result);
         mongo.save(record);
         return toResponse(record);
