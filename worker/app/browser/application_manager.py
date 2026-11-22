@@ -494,7 +494,7 @@ class ApplicationSessionManager:
             if profile.get("total_experience_years") is not None
             else profile.get("years_of_experience") or ""
         ).strip()
-        years_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:years?)?", explicit_years, re.I)
+        years_match = re.match(r"^\s*(\d+(?:\.\d+)?)", explicit_years, re.I)
         experience_years = float(years_match.group(1)) if years_match else None
 
         return {
