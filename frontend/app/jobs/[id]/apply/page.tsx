@@ -697,7 +697,9 @@ export default function ApplyPage() {
                                   ? "Verified career profile"
                                   : source.source === "saved_application_answer"
                                     ? "Previously saved application answer"
-                                    : "Tailored resume"} · {source.path}
+                                    : source.source === "original_resume"
+                                      ? "Original uploaded resume (PDF)"
+                                      : "Tailored resume"} · {source.path}
                               </div>
                               <p className="mt-1 text-xs leading-5 text-slate-300">{source.detail}</p>
                             </div>
