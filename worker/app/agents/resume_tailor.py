@@ -12,16 +12,69 @@ from docx.shared import Inches, Pt, RGBColor
 from fastapi import HTTPException
 from pydantic import ValidationError
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
+from reportlab.lib.units import inch, mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from app.schemas.tailored_resume import TailoredResumeDraft
 from app.services.vertex_client import VertexError, generate_text
 
 logger = logging.getLogger(__name__)
+
+
+RESUME_STYLES = {
+    "classic": {
+        "label": "ATS Classic",
+        "font": "Arial",
+        "accent": "176B87",
+        "ink": "172033",
+        "body": 9.0,
+        "heading": 10.0,
+        "name": 20.0,
+        "margin_top": 0.55,
+        "margin_bottom": 0.55,
+        "margin_side": 0.65,
+        "header_alignment": "center",
+    },
+    "modern": {
+        "label": "Modern Professional",
+        "font": "Calibri",
+        "accent": "3157A4",
+        "ink": "14213D",
+        "body": 9.2,
+        "heading": 10.5,
+        "name": 23.0,
+        "margin_top": 0.62,
+        "margin_bottom": 0.62,
+        "margin_side": 0.72,
+        "header_alignment": "left",
+    },
+    "compact": {
+        "label": "Compact Executive",
+        "font": "Arial",
+        "accent": "334155",
+        "ink": "111827",
+        "body": 8.2,
+        "heading": 9.2,
+        "name": 18.0,
+        "margin_top": 0.40,
+        "margin_bottom": 0.40,
+        "margin_side": 0.55,
+        "header_alignment": "center",
+    },
+}
+
+
+def _style_config(style: str) -> tuple[str, dict]:
+    key = str(style or "classic").strip().lower()
+    if key not in RESUME_STYLES:
+        raise HTTPException(
+            status_code=400,
+            detail="Resume style must be classic, modern or compact.",
+        )
+    return key, RESUME_STYLES[key]
 
 
 def _text(value) -> str:
@@ -375,56 +428,74 @@ def _date_range(item: dict) -> str:
     return " - ".join(part for part in (start, end) if part)
 
 
-def _docx_heading(document: Document, value: str):
+def _docx_heading(document: Document, value: str, accent: str, font: str, heading_size: float):
     if value:
         paragraph = document.add_heading(value, level=1)
         paragraph.paragraph_format.space_before = Pt(8)
         paragraph.paragraph_format.space_after = Pt(3)
+        for run in paragraph.runs:
+            run.font.name = font
+            run.font.size = Pt(heading_size)
+            run.font.color.rgb = RGBColor.from_string(accent)
 
 
-def _make_docx(resume: dict) -> bytes:
+def _make_docx(resume: dict, style: str = "classic") -> bytes:
+    _, preset = _style_config(style)
     document = Document()
     section = document.sections[0]
-    section.top_margin = Inches(0.55)
-    section.bottom_margin = Inches(0.55)
-    section.left_margin = Inches(0.65)
-    section.right_margin = Inches(0.65)
+    section.top_margin = Inches(preset["margin_top"])
+    section.bottom_margin = Inches(preset["margin_bottom"])
+    section.left_margin = Inches(preset["margin_side"])
+    section.right_margin = Inches(preset["margin_side"])
 
     normal = document.styles["Normal"]
-    normal.font.name = "Arial"
-    normal.font.size = Pt(9)
-    normal.font.color.rgb = RGBColor(38, 48, 61)
-    normal.paragraph_format.space_after = Pt(3)
+    normal.font.name = preset["font"]
+    normal.font.size = Pt(preset["body"])
+    normal.font.color.rgb = RGBColor.from_string(preset["ink"])
+    normal.paragraph_format.space_after = Pt(2 if style == "compact" else 3)
 
+    alignment = (
+        WD_ALIGN_PARAGRAPH.LEFT
+        if preset["header_alignment"] == "left"
+        else WD_ALIGN_PARAGRAPH.CENTER
+    )
     name = document.add_paragraph()
-    name.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    name.alignment = alignment
     run = name.add_run(resume.get("full_name") or "Candidate")
     run.bold = True
-    run.font.size = Pt(20)
+    run.font.name = preset["font"]
+    run.font.size = Pt(preset["name"])
+    run.font.color.rgb = RGBColor.from_string(preset["ink"])
 
     headline = document.add_paragraph()
-    headline.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    headline.alignment = alignment
     run = headline.add_run(resume.get("target_headline") or resume.get("target_title") or "")
     run.bold = True
-    run.font.size = Pt(11)
-    run.font.color.rgb = RGBColor(23, 107, 135)
+    run.font.name = preset["font"]
+    run.font.size = Pt(preset["heading"])
+    run.font.color.rgb = RGBColor.from_string(preset["accent"])
 
     contact = " | ".join(value for value in (
         resume.get("email"), resume.get("phone"), resume.get("location")
     ) if value)
     if contact:
         paragraph = document.add_paragraph(contact)
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.alignment = alignment
+        for run in paragraph.runs:
+            run.font.size = Pt(max(7.5, preset["body"] - 1))
 
-    _docx_heading(document, "Professional Summary")
+    def heading(value: str):
+        _docx_heading(document, value, preset["accent"], preset["font"], preset["heading"])
+
+    heading("Professional Summary")
     document.add_paragraph(resume.get("professional_summary", ""))
 
     if resume.get("skills"):
-        _docx_heading(document, "Core Skills")
+        heading("Core Skills")
         document.add_paragraph("  •  ".join(resume["skills"]))
 
     if resume.get("experience"):
-        _docx_heading(document, "Professional Experience")
+        heading("Professional Experience")
         for item in resume["experience"]:
             paragraph = document.add_paragraph()
             paragraph.paragraph_format.keep_with_next = True
@@ -441,7 +512,7 @@ def _make_docx(resume: dict) -> bytes:
             for bullet in item.get("bullets", []):
                 paragraph = document.add_paragraph(style="List Bullet")
                 paragraph.paragraph_format.left_indent = Inches(0.2)
-                paragraph.paragraph_format.space_after = Pt(2)
+                paragraph.paragraph_format.space_after = Pt(1 if style == "compact" else 2)
                 paragraph.add_run(bullet["text"])
             if item.get("technologies"):
                 paragraph = document.add_paragraph()
@@ -450,7 +521,7 @@ def _make_docx(resume: dict) -> bytes:
                 paragraph.add_run(", ".join(item["technologies"]))
 
     if resume.get("projects"):
-        _docx_heading(document, "Selected Projects")
+        heading("Selected Projects")
         for item in resume["projects"]:
             paragraph = document.add_paragraph()
             paragraph.paragraph_format.keep_with_next = True
@@ -463,7 +534,7 @@ def _make_docx(resume: dict) -> bytes:
                 document.add_paragraph("Technologies: " + ", ".join(item["technologies"]))
 
     if resume.get("education"):
-        _docx_heading(document, "Education")
+        heading("Education")
         for item in resume["education"]:
             if not isinstance(item, dict):
                 continue
@@ -476,7 +547,7 @@ def _make_docx(resume: dict) -> bytes:
             document.add_paragraph(" | ".join(part for part in values if part))
 
     if resume.get("certifications"):
-        _docx_heading(document, "Certifications")
+        heading("Certifications")
         for item in resume["certifications"]:
             document.add_paragraph(str(item), style="List Bullet")
 
@@ -485,49 +556,57 @@ def _make_docx(resume: dict) -> bytes:
     return output.getvalue()
 
 
-def _make_pdf(resume: dict) -> bytes:
+def _make_pdf(resume: dict, style: str = "classic") -> bytes:
+    _, preset = _style_config(style)
     output = BytesIO()
+    side_margin = preset["margin_side"] * inch
     document = SimpleDocTemplate(
         output,
         pagesize=A4,
-        rightMargin=16 * mm,
-        leftMargin=16 * mm,
-        topMargin=13 * mm,
-        bottomMargin=13 * mm,
+        rightMargin=side_margin,
+        leftMargin=side_margin,
+        topMargin=preset["margin_top"] * inch,
+        bottomMargin=preset["margin_bottom"] * inch,
         title=(resume.get("full_name") or "Candidate") + " - " + (resume.get("target_title") or "Resume"),
         author=resume.get("full_name") or "JobPilot",
     )
     base = getSampleStyleSheet()
+    header_alignment = TA_LEFT if preset["header_alignment"] == "left" else TA_CENTER
+    accent = colors.HexColor("#" + preset["accent"])
+    ink = colors.HexColor("#" + preset["ink"])
     name_style = ParagraphStyle(
         "ResumeName", parent=base["Title"], fontName="Helvetica-Bold",
-        fontSize=18, leading=21, alignment=TA_CENTER, textColor=colors.HexColor("#172033"),
-        spaceAfter=2,
+        fontSize=preset["name"], leading=preset["name"] + 3, alignment=header_alignment,
+        textColor=ink, spaceAfter=2,
     )
     headline_style = ParagraphStyle(
         "ResumeHeadline", parent=base["Normal"], fontName="Helvetica-Bold",
-        fontSize=10, leading=13, alignment=TA_CENTER, textColor=colors.HexColor("#176B87"),
-        spaceAfter=3,
+        fontSize=preset["heading"], leading=preset["heading"] + 3,
+        alignment=header_alignment, textColor=accent, spaceAfter=3,
     )
     contact_style = ParagraphStyle(
-        "ResumeContact", parent=base["Normal"], fontSize=8, leading=10,
-        alignment=TA_CENTER, textColor=colors.HexColor("#475569"), spaceAfter=8,
+        "ResumeContact", parent=base["Normal"], fontSize=max(7.5, preset["body"] - 1),
+        leading=max(9, preset["body"] + 1), alignment=header_alignment,
+        textColor=colors.HexColor("#475569"), spaceAfter=8,
     )
     section_style = ParagraphStyle(
         "ResumeSection", parent=base["Heading2"], fontName="Helvetica-Bold",
-        fontSize=10, leading=12, textColor=colors.HexColor("#176B87"),
-        spaceBefore=8, spaceAfter=3, keepWithNext=True,
+        fontSize=preset["heading"], leading=preset["heading"] + 2, textColor=accent,
+        spaceBefore=6 if style == "compact" else 8, spaceAfter=2 if style == "compact" else 3,
+        keepWithNext=True,
     )
     body_style = ParagraphStyle(
         "ResumeBody", parent=base["BodyText"], fontName="Helvetica",
-        fontSize=8.5, leading=11, textColor=colors.HexColor("#26303D"), spaceAfter=3,
+        fontSize=preset["body"], leading=preset["body"] * 1.28,
+        textColor=ink, spaceAfter=2 if style == "compact" else 3,
     )
     role_style = ParagraphStyle(
         "ResumeRole", parent=body_style, fontName="Helvetica-Bold",
-        spaceBefore=4, spaceAfter=1, keepWithNext=True,
+        spaceBefore=3, spaceAfter=1, keepWithNext=True,
     )
     bullet_style = ParagraphStyle(
         "ResumeBullet", parent=body_style, leftIndent=10, firstLineIndent=-7,
-        spaceAfter=2,
+        spaceAfter=1 if style == "compact" else 2,
     )
 
     story = [
@@ -603,7 +682,8 @@ def _make_pdf(resume: dict) -> bytes:
     return output.getvalue()
 
 
-async def tailor_resume(job: dict, requirements: dict, match: dict, profile: dict) -> dict:
+async def tailor_resume(job: dict, requirements: dict, match: dict, profile: dict, style: str = "classic") -> dict:
+    style, preset = _style_config(style)
     source_map, allowed_skills = _build_source_map(profile)
     if not any(key.startswith(("experience:", "project:")) for key in source_map):
         raise HTTPException(
@@ -629,11 +709,13 @@ async def tailor_resume(job: dict, requirements: dict, match: dict, profile: dic
         )
         draft = TailoredResumeDraft.model_validate(_decode_json(raw))
         resume = _validated_content(draft, profile, job, source_map, allowed_skills)
-        docx_bytes = _make_docx(resume)
-        pdf_bytes = _make_pdf(resume)
+        docx_bytes = _make_docx(resume, style)
+        pdf_bytes = _make_pdf(resume, style)
 
         return {
             "resume": resume,
+            "style": style,
+            "style_label": preset["label"],
             "documents": {
                 "docx_base64": base64.b64encode(docx_bytes).decode("ascii"),
                 "pdf_base64": base64.b64encode(pdf_bytes).decode("ascii"),

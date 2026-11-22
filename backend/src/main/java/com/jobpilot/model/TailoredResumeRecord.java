@@ -13,6 +13,7 @@ public class TailoredResumeRecord {
     private String jobId;
     private String jobTitle;
     private String company;
+    private String resumeStyle = "classic";
     private String profileResumeId;
     private Instant profileUpdatedAt;
     private Map<String, Object> resume;
@@ -29,6 +30,8 @@ public class TailoredResumeRecord {
     public void setJobTitle(String jobTitle) { this.jobTitle = jobTitle; }
     public String getCompany() { return company; }
     public void setCompany(String company) { this.company = company; }
+    public String getResumeStyle() { return resumeStyle; }
+    public void setResumeStyle(String resumeStyle) { this.resumeStyle = resumeStyle; }
     public String getProfileResumeId() { return profileResumeId; }
     public void setProfileResumeId(String profileResumeId) { this.profileResumeId = profileResumeId; }
     public Instant getProfileUpdatedAt() { return profileUpdatedAt; }

@@ -12,6 +12,7 @@ public class ApplicationRecord {
     private String id;
     private String jobId;
     private String tailoredResumeId;
+    private String resumeFormat = "pdf";
     private String jobTitle;
     private String company;
     private String applicationUrl;
@@ -32,6 +33,8 @@ public class ApplicationRecord {
     public void setJobId(String jobId) { this.jobId = jobId; }
     public String getTailoredResumeId() { return tailoredResumeId; }
     public void setTailoredResumeId(String tailoredResumeId) { this.tailoredResumeId = tailoredResumeId; }
+    public String getResumeFormat() { return resumeFormat; }
+    public void setResumeFormat(String resumeFormat) { this.resumeFormat = resumeFormat; }
     public String getJobTitle() { return jobTitle; }
     public void setJobTitle(String jobTitle) { this.jobTitle = jobTitle; }
     public String getCompany() { return company; }

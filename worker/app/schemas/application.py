@@ -5,7 +5,8 @@ class PrepareApplicationRequest(BaseModel):
     application_id: str = Field(min_length=1, max_length=80)
     job_url: HttpUrl
     career_profile: dict = Field(min_length=1)
-    tailored_resume_pdf_base64: str = Field(min_length=16)
+    tailored_resume_base64: str = Field(min_length=16)
+    tailored_resume_filename: str = Field(default="tailored-resume.pdf", min_length=1, max_length=160)
 
 
 class SubmitApplicationRequest(BaseModel):

@@ -2,6 +2,7 @@ import unittest
 
 from app.browser.application_manager import (
     ApplicationAutomationError,
+    ApplicationSessionManager,
     _classify_field,
     _match_country_code_option,
     _national_number,
@@ -44,6 +45,25 @@ class ApplicationAutomationTests(unittest.TestCase):
     def test_cover_letter_is_not_mistaken_for_resume(self):
         self.assertEqual(_classify_field("Cover letter", "cover_letter", "file"), "manual")
 
+    def test_checkboxes_are_tracked_but_never_inferred(self):
+        self.assertEqual(_classify_field("I agree to the privacy policy", "privacy", "checkbox"), "checkbox_review")
+        self.assertEqual(
+            _classify_field("Work authorization", "work_authorization", "checkbox"),
+            "sensitive_or_eligibility",
+        )
+
+    def test_required_unchecked_checkbox_blocks_application_review(self):
+        manager = ApplicationSessionManager()
+        fields = [
+            {"label": "I agree to the privacy policy", "required": True, "filled": False},
+            {"label": "Optional newsletter", "required": False, "filled": False},
+            {"label": "I confirm the information is accurate", "required": True, "filled": True},
+        ]
+        self.assertEqual(
+            manager._missing_required(fields),
+            ["I agree to the privacy policy"],
+        )
+
     def test_matches_country_code_from_international_phone(self):
         options = [
             {"value": "+1", "text": "United States (+1)"},
@@ -58,6 +78,7 @@ class ApplicationAutomationTests(unittest.TestCase):
         self.assertEqual(_resume_upload_score({"label": "Resume / CV"}), 100)
         self.assertEqual(_resume_upload_score({"label": "Cover letter", "accept": ".pdf"}), -1)
         self.assertEqual(_resume_upload_score({"label": "Upload a file", "accept": ".pdf"}), 20)
+        self.assertEqual(_resume_upload_score({"label": "Upload a file", "accept": ".docx"}), 20)
 
     def test_does_not_guess_country_code_from_local_number(self):
         options = [{"value": "+91", "text": "India (+91)"}]
