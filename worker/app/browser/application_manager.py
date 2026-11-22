@@ -100,9 +100,13 @@ def _validate_greenhouse_url(value: str):
 
 def _classify_field(label: str, name: str, input_type: str) -> str:
     text = f"{label} {name}".lower().replace("_", " ").replace("-", " ")
-    if any(term in text for term in ("race", "ethnicity", "gender", "veteran", "disability",
-                                     "sexual orientation", "pronoun", "date of birth",
-                                     "citizenship", "work authorization", "sponsorship")):
+    if any(term in text for term in (
+        "race", "ethnicity", "gender", "veteran", "disability",
+        "sexual orientation", "pronoun", "date of birth", "citizenship",
+        "work authorization", "work authorisation", "sponsorship",
+        "previously employed", "previous employment", "ever employed",
+        "worked for", "eligible to work",
+    )):
         return "sensitive_or_eligibility"
     if any(term in text for term in ("country code", "dial code", "phone code", "telephone code", "mobile code")):
         return "phone_country_code"
@@ -110,6 +114,15 @@ def _classify_field(label: str, name: str, input_type: str) -> str:
         return "resume"
     if input_type == "checkbox":
         return "checkbox_review"
+    if any(term in text for term in (
+        "professional software experience", "experience range", "years of experience",
+        "total experience", "experience in software",
+    )):
+        return "experience_range"
+    if "country" in text:
+        return "country"
+    if "city" in text or "location" in text:
+        return "city"
     if "full name" in text or text.strip() in {"name", "candidate name"}:
         return "full_name"
     if "first name" in text or text.strip() in {"first", "firstname", "fname"}:
@@ -129,6 +142,29 @@ def _classify_field(label: str, name: str, input_type: str) -> str:
     return "manual"
 
 
+def _match_experience_range_option(options: list[dict], years: float) -> dict | None:
+    """Return an option only when exactly one label unambiguously contains the verified years."""
+    matches = []
+    for option in options:
+        label = str(option.get("text") or "").strip().lower()
+        if not label:
+            continue
+        range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)", label)
+        if range_match:
+            lower, upper = float(range_match.group(1)), float(range_match.group(2))
+            if lower <= years <= upper:
+                matches.append(option)
+            continue
+        plus_match = re.search(r"(\d+(?:\.\d+)?)\s*\+", label)
+        if plus_match:
+            if years >= float(plus_match.group(1)):
+                matches.append(option)
+            continue
+        less_match = re.search(r"(?:less than|under|below)\s*(\d+(?:\.\d+)?)", label)
+        if less_match and years < float(less_match.group(1)):
+            matches.append(option)
+    return matches[0] if len(matches) == 1 else None
+
 @dataclass
 class BrowserSession:
     session_id: str
@@ -138,6 +174,8 @@ class BrowserSession:
     page: object
     frame: object
     upload_path: Path
+    career_profile: dict = field(default_factory=dict)
+    form_verification: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_activity: float = field(default_factory=time.monotonic)
     status: str = "BROWSER_OPEN"
@@ -209,12 +247,11 @@ class ApplicationSessionManager:
                 page=page,
                 frame=frame,
                 upload_path=upload_path,
+                career_profile=career_profile,
                 application_url=page.url,
             )
             self.sessions[application_id] = session
-            session.fields = await self._snapshot_fields(frame)
-            await self._autofill(session, career_profile)
-            session.fields = await self._snapshot_fields(frame)
+            await self._run_agentic_form_completion(session)
             session.missing_required_fields = self._missing_required(session.fields)
             session.status = "NEEDS_USER_INPUT" if session.missing_required_fields else "READY_FOR_REVIEW"
             if await self._has_challenge(page):
@@ -272,8 +309,7 @@ class ApplicationSessionManager:
                 session.status = "NEEDS_USER_INPUT"
                 session.message = "The application form is not currently available in the browser. Finish any page prompt and refresh again."
                 return self._serialize(session)
-            await self._upload_resume(session)
-            session.fields = await self._snapshot_fields(session.frame)
+            await self._run_agentic_form_completion(session)
             session.missing_required_fields = self._missing_required(session.fields)
             if challenge:
                 session.status = "NEEDS_USER_INPUT"
@@ -391,10 +427,17 @@ class ApplicationSessionManager:
                        nativeType || el.tagName.toLowerCase();
           const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
           const parentLabel = el.closest('label')?.innerText || '';
+          const fieldsetLabel = el.closest('fieldset')?.querySelector('legend')?.innerText || '';
+          const wrapper = el.closest('[data-field], .field, .form-field');
+          const wrapperLabel = wrapper
+            ? Array.from(wrapper.querySelectorAll('label, legend, [data-label]'))
+                .map(node => (node.innerText || node.textContent || '').trim()).filter(Boolean).join(' ')
+            : '';
           const labelledBy = el.getAttribute('aria-labelledby');
           const ariaText = labelledBy ? labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ') : '';
           const label = (labels.join(' ') || parentLabel || el.getAttribute('aria-label') || ariaText ||
-                         el.getAttribute('placeholder') || el.getAttribute('name') || el.id || 'Unlabelled field').trim();
+                         fieldsetLabel || wrapperLabel || el.getAttribute('placeholder') ||
+                         el.getAttribute('name') || el.id || 'Unlabelled field').trim();
           const required = Boolean(el.required || el.getAttribute('aria-required') === 'true');
           let filled = false;
           if (type === 'file') filled = Boolean(el.files && el.files.length);
@@ -430,6 +473,16 @@ class ApplicationSessionManager:
     def _profile_values(self, profile: dict) -> dict:
         full_name = str(profile.get("full_name") or "").strip()
         parts = full_name.split()
+        location = str(profile.get("location") or "").strip()
+        location_parts = [part.strip() for part in location.split(",") if part.strip()]
+        explicit_years = str(
+            profile.get("total_experience_years")
+            if profile.get("total_experience_years") is not None
+            else profile.get("years_of_experience") or ""
+        ).strip()
+        years_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:years?)?", explicit_years, re.I)
+        experience_years = float(years_match.group(1)) if years_match else None
+
         return {
             "full_name": full_name,
             "first_name": parts[0] if parts else "",
@@ -439,53 +492,160 @@ class ApplicationSessionManager:
             "linkedin": str(profile.get("linkedin_url") or profile.get("linkedin") or "").strip(),
             "github": str(profile.get("github_url") or profile.get("github") or "").strip(),
             "website": str(profile.get("website") or profile.get("portfolio_url") or "").strip(),
+            # Only split the verified location string when it has multiple parts.
+            "city": str(profile.get("city") or profile.get("location_city") or (
+                location_parts[0] if len(location_parts) >= 2 else ""
+            )).strip(),
+            "country": str(profile.get("country") or (
+                location_parts[-1] if len(location_parts) >= 2 else ""
+            )).strip(),
+            "experience_years": experience_years,
         }
 
-    async def _autofill(self, session: BrowserSession, career_profile: dict):
+    async def _autofill(self, session: BrowserSession, career_profile: dict) -> int:
+        """Fill only blank fields with one unambiguous value from the user's verified profile."""
         values = self._profile_values(career_profile)
+        filled_count = 0
         selected_calling_code = await self._select_phone_country_code(session, values.get("phone", ""))
 
         phone_value = values.get("phone", "")
         if selected_calling_code:
             phone_value = _national_number(values.get("phone", ""), selected_calling_code)
-            session.automation_notes.append(
+            self._add_note(
+                session,
                 f"Selected phone country code +{selected_calling_code} from the verified international phone number."
             )
         elif any(item["classification"] == "phone_country_code" for item in session.fields):
-            session.automation_notes.append(
+            self._add_note(
+                session,
                 "Could not safely match the phone country code to the verified phone number; choose it manually."
             )
 
         checkbox_fields = [item for item in session.fields if item["type"] == "checkbox"]
         if checkbox_fields:
-            session.automation_notes.append(
+            self._add_note(
+                session,
                 f"Checkbox review: {len(checkbox_fields)} checkbox field(s) were detected and left for your explicit choice in Chromium. "
                 "JobPilot does not assume consent, eligibility, or screening answers."
             )
 
         for item in session.fields:
             classification = item["classification"]
-            if item["filled"] or item["type"] in {"file", "checkbox", "radio", "select", "button", "div", "span"}:
+            input_type = item["type"]
+            if item["filled"] or input_type in {
+                "file", "checkbox", "radio", "button", "div", "span", "hidden"
+            }:
                 continue
-            if classification == "phone_country_code":
+            if classification in {"manual", "sensitive_or_eligibility", "phone_country_code"}:
                 continue
-            value = phone_value if classification == "phone" else values.get(classification, "")
-            if value:
-                try:
-                    await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).fill(value)
-                except Exception:
+
+            control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
+            try:
+                if classification in {"country", "experience_range"} and input_type == "select":
+                    options = await control.locator("option").evaluate_all(
+                        "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
+                    )
+                    if classification == "country":
+                        desired = values.get("country", "")
+                        normalized = re.sub(r"[^a-z0-9]", "", desired.lower())
+                        matches = [
+                            option for option in options
+                            if option.get("value") and normalized
+                            and re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()) == normalized
+                        ]
+                    else:
+                        years = values.get("experience_years")
+                        if years is None:
+                            continue
+                        match = _match_experience_range_option(options, years)
+                        matches = [match] if match else []
+
+                    if len(matches) == 1:
+                        await control.select_option(value=matches[0]["value"])
+                        filled_count += 1
+                    elif classification == "country" and desired:
+                        self._add_note(
+                            session,
+                            f"Country: no exact Greenhouse option matched the verified profile value {desired!r}; choose it manually."
+                        )
                     continue
+
+                if classification == "city":
+                    value = values.get("city", "")
+                elif classification == "phone":
+                    value = phone_value
+                else:
+                    value = values.get(classification, "")
+
+                if not value:
+                    continue
+                if input_type not in {"text", "email", "tel", "url", "textarea"}:
+                    continue
+                await control.fill(value)
+                filled_count += 1
+            except Exception:
+                # A failed locator or re-render is retried by the next verification pass.
+                continue
 
         manual_dropdowns = [
             item for item in session.fields
-            if item["type"] == "select" and item["classification"] == "manual" and not item["filled"]
+            if item["type"] == "select" and item["classification"] in {"manual", "sensitive_or_eligibility"}
+            and not item["filled"]
         ]
         if manual_dropdowns:
-            session.automation_notes.append(
-                "Other job-specific dropdowns were left for manual selection; JobPilot does not guess screening or eligibility answers."
+            self._add_note(
+                session,
+                "Job-specific screening and eligibility dropdowns were left for your manual choice; JobPilot will not guess these answers."
             )
 
         await self._upload_resume(session)
+        return filled_count
+
+    async def _run_agentic_form_completion(self, session: BrowserSession):
+        """Observe, safely repair, and verify the live form in three bounded passes."""
+        pass_results = []
+        for pass_number in range(1, 4):
+            await session.page.wait_for_timeout(200)
+            current_frame = await self._find_application_frame(session.page)
+            if current_frame is not None:
+                session.frame = current_frame
+
+            session.fields = await self._snapshot_fields(session.frame)
+            safe_fills = await self._autofill(session, session.career_profile)
+            await session.page.wait_for_timeout(250)
+            session.fields = await self._snapshot_fields(session.frame)
+            session.missing_required_fields = self._missing_required(session.fields)
+
+            pass_results.append({
+                "pass": pass_number,
+                "fields_checked": len(session.fields),
+                "safe_fills": safe_fills,
+                "required_fields_remaining": len(session.missing_required_fields),
+            })
+
+        session.form_verification = {
+            "passes_completed": len(pass_results),
+            "passes_required": 3,
+            "required_fields_remaining": len(session.missing_required_fields),
+            "complete": len(session.missing_required_fields) == 0,
+            "pass_results": pass_results,
+        }
+        session.automation_notes = [
+            note for note in session.automation_notes
+            if not note.startswith("Form verification:")
+        ]
+        remaining = len(session.missing_required_fields)
+        outcome = "all required fields are detected as complete" if remaining == 0 else (
+            f"{remaining} required field(s) still need attention"
+        )
+        session.automation_notes.append(
+            f"Form verification: completed 3/3 observe-and-verify passes; {outcome}. "
+            "Only values from the verified profile were autofilled. Screening, eligibility, consent and unclear fields remain manual."
+        )
+
+    def _add_note(self, session: BrowserSession, note: str):
+        if note not in session.automation_notes:
+            session.automation_notes.append(note)
 
     async def _select_phone_country_code(self, session: BrowserSession, phone: str) -> str | None:
         if not phone.strip().startswith("+"):
@@ -748,6 +908,7 @@ class ApplicationSessionManager:
             "missing_required_fields": session.missing_required_fields,
             "message": session.message,
             "automation_notes": session.automation_notes,
+            "form_verification": session.form_verification,
             "updated_at": _utc_now(),
         }
 
