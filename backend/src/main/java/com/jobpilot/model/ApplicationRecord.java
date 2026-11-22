@@ -23,6 +23,7 @@ public class ApplicationRecord {
     private String message;
     private List<String> automationNotes;
     private Map<String, Object> formVerification = Map.of();
+    private Map<String, Object> questionReview = Map.of();
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
     private Instant approvedAt;
@@ -57,6 +58,10 @@ public class ApplicationRecord {
     public Map<String, Object> getFormVerification() { return formVerification; }
     public void setFormVerification(Map<String, Object> formVerification) {
         this.formVerification = formVerification == null ? Map.of() : formVerification;
+    }
+    public Map<String, Object> getQuestionReview() { return questionReview; }
+    public void setQuestionReview(Map<String, Object> questionReview) {
+        this.questionReview = questionReview == null ? Map.of() : questionReview;
     }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
