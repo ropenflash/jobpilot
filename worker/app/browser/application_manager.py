@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 from app.agents.application_question_reviewer import build_evidence, review_application_questions
+from app.agents.application_answer_decision import decide_application_answer
 from app.agents.application_answer_resolver import (
     _direct_technology_years,
     _inferred_technology_years,
@@ -211,6 +212,7 @@ class BrowserSession:
     form_verification: dict = field(default_factory=dict)
     question_review: dict = field(default_factory=dict)
     manual_field_labels: dict = field(default_factory=dict)
+    answer_decisions: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_activity: float = field(default_factory=time.monotonic)
     status: str = "BROWSER_OPEN"
@@ -477,7 +479,7 @@ class ApplicationSessionManager:
                 item["classification"] = _classify_field(custom_label, item.get("name", ""), item.get("type", ""))
 
     async def _apply_candidate_answer(self, session: BrowserSession, manual_answer: dict):
-        """Fill one field with the exact answer the candidate just supplied in the JobPilot UI."""
+        """Validate and apply a candidate-confirmed answer to its current live field."""
         try:
             field_index = int(manual_answer.get("field_index"))
         except (TypeError, ValueError):
@@ -488,56 +490,42 @@ class ApplicationSessionManager:
         if not question or not answer or len(question) > 500 or len(answer) > 5000:
             return
 
+        if not hasattr(session, "answer_decisions"):
+            session.answer_decisions = {}
+        if not hasattr(session, "career_profile"):
+            session.career_profile = {}
+        if not hasattr(session, "tailored_resume"):
+            session.tailored_resume = {}
+
         session.fields = await self._snapshot_fields(session.frame)
+        session.manual_field_labels[field_index] = question
+        self._apply_manual_field_labels(session)
         field = next((item for item in session.fields if int(item.get("index", -1)) == field_index), None)
         if field is None:
             self._add_note(session, "The saved answer could not be attached to the live form because its field is no longer present. Enter it manually in Chromium.")
             return
 
-        input_type = str(field.get("type") or "").lower()
-        session.manual_field_labels[field_index] = question
-        if input_type in {"checkbox", "radio", "file", "button", "hidden"}:
-            session.fields = await self._snapshot_fields(session.frame)
-            self._apply_manual_field_labels(session)
-            self._add_note(session, "This answer was saved to your profile, but this control still requires manual interaction in Chromium.")
-            return
+        options = None
+        if field.get("type") == "select":
+            control = session.frame.locator(FIELD_SELECTOR).nth(field_index)
+            options = await control.locator("option").evaluate_all(
+                "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
+            )
 
-        control = session.frame.locator(FIELD_SELECTOR).nth(field_index)
-        try:
-            if input_type == "select":
-                options = await control.locator("option").evaluate_all(
-                    "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
-                )
-                normalized_answer = re.sub(r"[^a-z0-9]", "", answer.lower())
-                matches = [
-                    option for option in options
-                    if option.get("value") and normalized_answer
-                    and normalized_answer in {
-                        re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
-                        re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
-                    }
-                ]
-                if len(matches) != 1:
-                    self._add_note(session, "The answer is saved to your profile, but the current dropdown has no exact matching option. Please choose it manually in Chromium.")
-                    return
-                await control.select_option(value=matches[0]["value"])
-            elif input_type in {"text", "email", "tel", "url", "textarea", "number", "date"}:
-                if input_type == "number":
-                    numeric = re.search(r"\d+(?:\.\d+)?", answer.replace(",", ""))
-                    if not numeric:
-                        self._add_note(session, "This numeric field needs a plain numeric answer. The saved profile answer was retained for future reference.")
-                        return
-                    answer = numeric.group(0)
-                await control.fill(answer)
-            else:
-                self._add_note(session, "The answer is saved to your profile, but this control type needs manual entry in Chromium.")
-                return
-            session.manual_field_labels[field_index] = question
-            session.fields = await self._snapshot_fields(session.frame)
-            self._apply_manual_field_labels(session)
-            self._add_note(session, f"Applied your saved answer to the current form field: {question}")
-        except Exception:
-            self._add_note(session, "The answer is saved to your profile, but JobPilot could not apply it to the current field. Please enter it manually in Chromium.")
+        applied = await self._decide_and_apply(
+            session,
+            field,
+            answer,
+            "saved_application_answer",
+            options,
+        )
+        if applied:
+            self._add_note(session, f"Applied your candidate-confirmed answer to the current form field: {question}")
+        else:
+            self._add_note(
+                session,
+                "Your answer remains saved in the career profile, but the current field was left unchanged because its evidence or control validation needs review."
+            )
 
     async def _snapshot_fields(self, frame) -> list[dict]:
         rows = await frame.locator(FIELD_SELECTOR).evaluate_all("""elements => elements.map((el, index) => {
@@ -578,7 +566,9 @@ class ApplicationSessionManager:
           const checked = type === 'checkbox' || type === 'radio'
             ? Boolean(el.checked || el.getAttribute('aria-checked') === 'true') : null;
           return { index, name: el.getAttribute('name') || '', id: el.id || '',
-                   label: label.slice(0, 180), type, required, filled, checked, options };
+                   label: label.slice(0, 180), type, required, filled, checked, options,
+                   min: el.getAttribute('min'), max: el.getAttribute('max'), pattern: el.getAttribute('pattern'),
+                   minLength: el.getAttribute('minlength'), maxLength: el.getAttribute('maxlength') };
         })""")
         seen_radio_groups = {}
         fields = []
@@ -722,8 +712,61 @@ class ApplicationSessionManager:
             "expected_ctc_numeric": expected_ctc_numeric,
         }
 
+    async def _decide_and_apply(
+        self,
+        session: BrowserSession,
+        item: dict,
+        candidate_answer: str | None,
+        answer_source: str | None,
+        options: list[dict] | None = None,
+    ) -> bool:
+        """Run the shared evidence/control gate before any automatic browser write."""
+        decision = decide_application_answer(
+            field=item,
+            candidate_answer=candidate_answer,
+            answer_source=answer_source,
+            career_profile=session.career_profile,
+            tailored_resume=session.tailored_resume,
+            options=options,
+        )
+        if decision["action"] != "autofill":
+            session.answer_decisions[int(item.get("index", -1))] = decision
+            if decision.get("conflicts"):
+                self._add_note(session, f"Conflict requires your review: {item.get('label', 'application field')}.")
+            return False
+
+        try:
+            control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
+            if item["type"] == "select":
+                await control.select_option(value=decision["answer"])
+            else:
+                await control.fill(decision["answer"])
+            decision["applied"] = True
+            session.answer_decisions[int(item.get("index", -1))] = decision
+            if answer_source == "saved_application_answer":
+                self._add_note(
+                    session,
+                    f"Reused a candidate-confirmed answer for: {item.get('label', 'application question')}",
+                )
+            return True
+        except Exception:
+            decision["action"] = "manual_review"
+            decision["answer"] = None
+            decision["applied"] = False
+            decision["reason"] = (
+                "The answer was supported, but the live browser control rejected the value. "
+                "JobPilot left the field for manual review."
+            )
+            session.answer_decisions[int(item.get("index", -1))] = decision
+            return False
+
     async def _autofill(self, session: BrowserSession, career_profile: dict) -> int:
-        """Fill only blank fields with one unambiguous value from the user's verified profile."""
+        """Fill only answers approved by the evidence-grounded decision engine."""
+        if not hasattr(session, "answer_decisions"):
+            session.answer_decisions = {}
+        if not hasattr(session, "tailored_resume"):
+            session.tailored_resume = {}
+        session.career_profile = career_profile
         values = self._profile_values(career_profile)
         filled_count = 0
         selected_calling_code = await self._select_phone_country_code(session, values.get("phone", ""))
@@ -749,19 +792,47 @@ class ApplicationSessionManager:
                 "JobPilot does not assume consent, eligibility, or screening answers."
             )
 
+        select_value_keys = {
+            "experience_range": "experience_years",
+            "years_java": "years_java",
+            "years_spring_boot": "years_spring_boot",
+            "years_microservices": "years_microservices",
+            "years_kafka": "years_kafka",
+            "years_gcp": "years_gcp",
+            "current_ctc": "current_ctc_numeric",
+            "expected_ctc": "expected_ctc_numeric",
+        }
+
         for item in session.fields:
             classification = item["classification"]
             input_type = item["type"]
-            if item["filled"] or input_type in {
-                "file", "checkbox", "radio", "button", "div", "span", "hidden"
-            }:
+            field_index = int(item.get("index", -1))
+
+            if item["filled"]:
+                previous = session.answer_decisions.get(field_index)
+                # Keep the original provenance visible after later verification passes
+                # observe the value that JobPilot has already entered.
+                if not previous or previous.get("action") != "autofill" or not previous.get("applied"):
+                    session.answer_decisions[field_index] = decide_application_answer(
+                        item, None, None, session.career_profile, session.tailored_resume
+                    )
                 continue
-            if classification in {"sensitive_or_eligibility", "checkbox_review", "phone_country_code", "unlabelled_field"}:
+
+            if classification in {
+                "sensitive_or_eligibility", "checkbox_review", "phone_country_code", "unlabelled_field"
+            } or input_type in {"file", "checkbox", "radio", "button", "div", "span", "hidden"}:
+                previous = session.answer_decisions.get(field_index)
+                if classification == "phone_country_code" and previous and previous.get("action") == "autofill" and previous.get("applied"):
+                    continue
+                decision = decide_application_answer(
+                    item, None, None, session.career_profile, session.tailored_resume
+                )
+                session.answer_decisions[field_index] = decision
                 continue
 
             saved_answer = resolve_saved_application_answer(
                 {
-                    "field_index": item["index"],
+                    "field_index": field_index,
                     "question": item.get("label", ""),
                     "classification": classification,
                     "filled": item.get("filled", False),
@@ -769,153 +840,83 @@ class ApplicationSessionManager:
                 career_profile,
             )
             saved_answer_text = str(saved_answer.get("suggested_answer") or "") if saved_answer else ""
-            if classification == "manual":
-                if saved_answer_text and input_type in {"text", "email", "tel", "url", "textarea", "number", "date"}:
-                    try:
-                        reusable_value = saved_answer_text
-                        if input_type == "number":
-                            saved_number = re.search(r"\d+(?:\.\d+)?", saved_answer_text.replace(",", ""))
-                            reusable_value = saved_number.group(0) if saved_number else ""
-                        if not reusable_value:
-                            continue
-                        await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).fill(reusable_value)
-                        filled_count += 1
-                        self._add_note(session, f"Reused a previous user-confirmed answer for: {item.get('label', 'application question')}")
-                    except Exception:
-                        pass
-                elif saved_answer_text and input_type == "select":
-                    try:
-                        manual_options = await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).locator("option").evaluate_all(
-                            "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
-                        )
-                        normalized_saved = re.sub(r"[^a-z0-9]", "", saved_answer_text.lower())
-                        manual_matches = [
-                            option for option in manual_options
-                            if option.get("value") and normalized_saved
-                            and normalized_saved in {
-                                re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
-                                re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
-                            }
-                        ]
-                        if len(manual_matches) == 1:
-                            await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).select_option(value=manual_matches[0]["value"])
-                            filled_count += 1
-                    except Exception:
-                        pass
-                continue
+            candidate = ""
+            source = None
 
-            control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
-            try:
-                if input_type == "select" and classification in {
+            if input_type == "select":
+                options = await session.frame.locator(FIELD_SELECTOR).nth(field_index).locator("option").evaluate_all(
+                    "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
+                )
+                if classification in {"country", "city", "notice_period", "join_availability"}:
+                    desired_key = {
+                        "country": "country",
+                        "city": "city",
+                        "notice_period": "notice_period",
+                        "join_availability": "join_availability",
+                    }[classification]
+                    candidate = str(values.get(desired_key) or "")
+                    if candidate:
+                        source = "verified_profile"
+                elif classification in select_value_keys:
+                    candidate = str(values.get(select_value_keys[classification]) or "")
+                    if candidate:
+                        source = "verified_profile"
+                if not candidate and saved_answer_text:
+                    candidate = saved_answer_text
+                    source = "saved_application_answer"
+
+                if classification in {
                     "country", "city", "experience_range", "years_java", "years_spring_boot",
                     "years_microservices", "years_kafka", "years_gcp", "notice_period",
                     "join_availability", "current_ctc", "expected_ctc",
-                }:
-                    options = await control.locator("option").evaluate_all(
-                        "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
-                    )
-                    if classification in {"country", "city", "notice_period", "join_availability"}:
-                        desired_key = {
-                            "country": "country",
-                            "city": "city",
-                            "notice_period": "notice_period",
-                            "join_availability": "join_availability",
-                        }[classification]
-                        desired = values.get(desired_key, "")
-                        normalized = re.sub(r"[^a-z0-9]", "", str(desired).lower())
-                        matches = [
-                            option for option in options
-                            if option.get("value") and normalized
-                            and re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()) == normalized
-                        ]
-                    else:
-                        years_key = {
-                            "experience_range": "experience_years",
-                            "years_java": "years_java",
-                            "years_spring_boot": "years_spring_boot",
-                            "years_microservices": "years_microservices",
-                            "years_kafka": "years_kafka",
-                            "years_gcp": "years_gcp",
-                            "current_ctc": "current_ctc_numeric",
-                            "expected_ctc": "expected_ctc_numeric",
-                        }[classification]
-                        years = values.get(years_key)
-                        try:
-                            years_number = float(years) if years not in (None, "") else None
-                        except (TypeError, ValueError):
-                            years_number = None
-                        if years_number is None and saved_answer_text:
-                            saved_number_match = re.search(r"(\d+(?:\.\d+)?)", saved_answer_text.replace(",", ""))
-                            years_number = float(saved_number_match.group(1)) if saved_number_match else None
-                        match = _match_experience_range_option(options, years_number) if years_number is not None else None
-                        matches = [match] if match else []
-
-                    if not matches and saved_answer_text:
-                        normalized_answer = re.sub(r"[^a-z0-9]", "", saved_answer_text.lower())
-                        exact_saved_matches = [
-                            option for option in options
-                            if option.get("value") and normalized_answer
-                            and normalized_answer in {
-                                re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
-                                re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
-                            }
-                        ]
-                        if len(exact_saved_matches) == 1:
-                            matches = exact_saved_matches
-                    if len(matches) == 1:
-                        await control.select_option(value=matches[0]["value"])
+                } or source == "saved_application_answer":
+                    if await self._decide_and_apply(session, item, candidate, source, options):
                         filled_count += 1
-                    elif classification in {"country", "city", "notice_period", "join_availability"} and desired:
-                        self._add_note(
-                            session,
-                            f"{classification.replace('_', ' ').title()}: no exact Greenhouse option matched the verified profile value {desired!r}; choose it manually."
-                        )
-                    continue
-
-                if classification == "city":
-                    value = values.get("city", "")
-                elif classification == "phone":
-                    value = phone_value
-                elif classification == "notice_period":
-                    question_text = str(item.get("label") or "").lower()
-                    compound_notice_question = "last working day" in question_text or "serving notice" in question_text
-                    if input_type == "number":
-                        notice_digits = re.search(r"\d+(?:\.\d+)?", values.get("notice_period", ""))
-                        value = notice_digits.group(0) if notice_digits else ""
-                    elif compound_notice_question:
-                        value = values.get("notice_period_answer", "")
-                    else:
-                        value = values.get("notice_period", "")
-                elif classification == "last_working_day":
-                    value = (
-                        values.get("last_working_day_answer", "")
-                        if input_type != "date"
-                        else values.get("last_working_day", "")
-                    )
-                elif classification == "current_ctc":
-                    value = values.get("current_ctc_numeric" if input_type == "number" else "current_ctc", "")
-                elif classification == "expected_ctc":
-                    value = values.get("expected_ctc_numeric" if input_type == "number" else "expected_ctc", "")
-                elif classification == "years_spring_boot_microservices":
-                    value = values.get("years_spring_boot_microservices", "")
                 else:
-                    value = values.get(classification, "")
-
-                if not value and saved_answer_text:
-                    value = saved_answer_text
-                    self._add_note(session, f"Reused a previous user-confirmed answer for: {item.get('label', 'application question')}")
-                if value and input_type == "number":
-                    numeric_value = re.search(r"\d+(?:\.\d+)?", str(value).replace(",", ""))
-                    value = numeric_value.group(0) if numeric_value else ""
-                if not value:
-                    continue
-                if input_type not in {"text", "email", "tel", "url", "textarea", "number", "date"}:
-                    continue
-                await control.fill(value)
-                filled_count += 1
-            except Exception:
-                # A failed locator or re-render is retried by the next verification pass.
+                    session.answer_decisions[field_index] = decide_application_answer(
+                        item, None, None, session.career_profile, session.tailored_resume, options
+                    )
                 continue
+
+            if classification == "city":
+                candidate = values.get("city", "")
+            elif classification == "phone":
+                candidate = phone_value
+            elif classification == "notice_period":
+                question_text = str(item.get("label") or "").lower()
+                compound_notice_question = "last working day" in question_text or "serving notice" in question_text
+                if input_type == "number":
+                    notice_digits = re.search(r"\d+(?:\.\d+)?", values.get("notice_period", ""))
+                    candidate = notice_digits.group(0) if notice_digits else ""
+                elif compound_notice_question:
+                    candidate = values.get("notice_period_answer", "")
+                else:
+                    candidate = values.get("notice_period", "")
+            elif classification == "last_working_day":
+                candidate = (
+                    values.get("last_working_day_answer", "")
+                    if input_type != "date"
+                    else values.get("last_working_day", "")
+                )
+            elif classification == "current_ctc":
+                candidate = values.get("current_ctc_numeric" if input_type == "number" else "current_ctc", "")
+            elif classification == "expected_ctc":
+                candidate = values.get("expected_ctc_numeric" if input_type == "number" else "expected_ctc", "")
+            elif classification == "years_spring_boot_microservices":
+                candidate = values.get("years_spring_boot_microservices", "")
+            elif classification == "experience_range":
+                candidate = values.get("experience_years", "")
+            else:
+                candidate = values.get(classification, "")
+
+            if candidate:
+                source = "verified_profile"
+            elif saved_answer_text:
+                candidate = saved_answer_text
+                source = "saved_application_answer"
+
+            if await self._decide_and_apply(session, item, candidate, source):
+                filled_count += 1
 
         manual_dropdowns = [
             item for item in session.fields
@@ -982,6 +983,41 @@ class ApplicationSessionManager:
             session.career_profile,
             getattr(session, "tailored_resume", {}),
         )
+        decision_store = getattr(session, "answer_decisions", None)
+        if decision_store is None:
+            decision_store = {}
+            session.answer_decisions = decision_store
+        for review in session.question_review.get("reviews", []):
+            field_index = int(review.get("field_index", -1))
+            decision = decision_store.get(field_index)
+            if review.get("suggested_answer") and (
+                not decision or decision.get("action") == "ask_candidate"
+            ):
+                field = next((item for item in session.fields if int(item.get("index", -1)) == field_index), None)
+                if field is not None:
+                    decision = decide_application_answer(
+                        field,
+                        review.get("suggested_answer"),
+                        "ai_draft",
+                        session.career_profile,
+                        getattr(session, "tailored_resume", {}),
+                    )
+                    decision_store[field_index] = decision
+            if decision is None:
+                status = review.get("evidence_status")
+                action = "manual_review" if status == "manual_review" else "ask_candidate"
+                decision = {
+                    "field_index": field_index,
+                    "question": review.get("question"),
+                    "action": action,
+                    "answer_source": "none",
+                    "confidence": 0.0,
+                    "reason": "No trusted autofill decision was recorded for this field.",
+                    "evidence": review.get("evidence", []),
+                    "conflicts": [],
+                    "applied": False,
+                }
+            review["decision"] = decision
         if session.question_review.get("status") == "unavailable":
             self._add_note(
                 session,
@@ -1004,34 +1040,41 @@ class ApplicationSessionManager:
             return None
 
         item = controls[0]
+        # Custom ARIA listboxes are intentionally left for the candidate; the
+        # decision engine currently supports native select controls only.
+        if item["type"] != "select":
+            session.answer_decisions[int(item.get("index", -1))] = decide_application_answer(
+                item, None, None, session.career_profile, session.tailored_resume
+            )
+            return None
+
         control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
         try:
-            if item["type"] == "select":
-                options = await control.locator("option").evaluate_all(
-                    "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
-                )
-                match = _match_country_code_option(options, phone)
-                if match and match["value"]:
-                    await control.select_option(value=match["value"])
-                    return match["calling_code"]
-                return None
-
-            await control.click()
-            options_locator = session.frame.locator("[role='option']")
-            options = await options_locator.evaluate_all(
-                """elements => elements.map((el, index) => ({
-                    index,
-                    value: el.getAttribute('data-value') || el.getAttribute('value') || '',
-                    text: (el.innerText || el.textContent || '').trim()
-                }))"""
+            options = await control.locator("option").evaluate_all(
+                "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
             )
             match = _match_country_code_option(options, phone)
-            if match:
-                await options_locator.nth(match["index"]).click()
-                return match["calling_code"]
+            if not match or not match.get("value"):
+                return None
+            calling_code = match["calling_code"]
+            decision = decide_application_answer(
+                item,
+                f"+{calling_code}",
+                "verified_profile",
+                session.career_profile,
+                session.tailored_resume,
+                [{"value": f"+{calling_code}", "text": f"+{calling_code}"}],
+            )
+            if decision.get("action") != "autofill":
+                session.answer_decisions[int(item.get("index", -1))] = decision
+                return None
+            await control.select_option(value=match["value"])
+            decision["applied"] = True
+            decision["option"] = {"value": match["value"], "label": match.get("text", "")}
+            session.answer_decisions[int(item.get("index", -1))] = decision
+            return calling_code
         except Exception:
             return None
-        return None
 
     async def _upload_resume(self, session: BrowserSession):
         if session.resume_attached:

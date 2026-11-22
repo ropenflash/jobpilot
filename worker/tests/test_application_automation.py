@@ -226,6 +226,17 @@ class AgenticFormVerificationTests(unittest.IsolatedAsyncioTestCase):
             fields=[],
             manual_field_labels={},
             automation_notes=[],
+            answer_decisions={},
+            career_profile={
+                "application_answers": [{
+                    "question": "How many years of experience working with Kafka?",
+                    "normalized_question": "how many years of experience working with kafka",
+                    "answer": "4 years",
+                    "classification": "years_kafka",
+                    "candidate_confirmed": True,
+                }]
+            },
+            tailored_resume={},
         )
         manager._snapshot_fields = AsyncMock(side_effect=[
             [dict(raw_field)],
