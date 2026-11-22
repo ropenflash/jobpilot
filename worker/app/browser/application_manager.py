@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 from app.agents.application_question_reviewer import build_evidence, review_application_questions
+from app.agents.application_answer_rag import extract_original_resume_text
 from app.agents.application_answer_decision import decide_application_answer
 from app.agents.application_answer_resolver import (
     _direct_technology_years,
@@ -210,6 +211,7 @@ class BrowserSession:
     career_profile: dict = field(default_factory=dict)
     tailored_resume: dict = field(default_factory=dict)
     job_context: dict = field(default_factory=dict)
+    source_resume_text: str = ""
     form_verification: dict = field(default_factory=dict)
     question_review: dict = field(default_factory=dict)
     manual_field_labels: dict = field(default_factory=dict)
@@ -235,7 +237,8 @@ class ApplicationSessionManager:
     async def prepare(self, application_id: str, job_url: str, career_profile: dict,
                       resume_base64: str, resume_filename: str = "tailored-resume.pdf",
                       tailored_resume: dict | None = None,
-                      job_context: dict | None = None) -> dict:
+                      job_context: dict | None = None,
+                      source_resume_base64: str | None = None) -> dict:
         _validate_greenhouse_url(job_url)
         await self._expire_stale_sessions()
         extension = Path(resume_filename).suffix.lower()
@@ -254,6 +257,22 @@ class ApplicationSessionManager:
         upload_dir.mkdir(parents=True, exist_ok=True)
         upload_path = upload_dir / f"{application_id}{extension}"
         upload_path.write_bytes(resume_bytes)
+
+        source_resume_text = ""
+        source_resume_note = None
+        if source_resume_base64:
+            try:
+                source_resume_text = extract_original_resume_text(
+                    source_resume_base64,
+                    career_profile,
+                )
+            except ValueError:
+                # The original source is an additional evidence source, not a requirement
+                # for preparing an application. Continue with profile and tailored resume.
+                source_resume_note = (
+                    "Original resume PDF text could not be read. Question review will use "
+                    "the verified career profile and tailored resume only."
+                )
 
         playwright = await async_playwright().start()
         try:
@@ -290,9 +309,12 @@ class ApplicationSessionManager:
                 career_profile=career_profile,
                 tailored_resume=tailored_resume or {},
                 job_context=job_context or {},
+                source_resume_text=source_resume_text,
                 application_url=page.url,
             )
             self.sessions[application_id] = session
+            if source_resume_note:
+                self._add_note(session, source_resume_note)
             await self._run_agentic_form_completion(session)
             session.missing_required_fields = self._missing_required(session.fields)
             session.status = "NEEDS_USER_INPUT" if session.missing_required_fields else "READY_FOR_REVIEW"
@@ -989,6 +1011,7 @@ class ApplicationSessionManager:
             session.career_profile,
             getattr(session, "tailored_resume", {}),
             getattr(session, "job_context", {}),
+            getattr(session, "source_resume_text", ""),
         )
         decision_store = getattr(session, "answer_decisions", None)
         if decision_store is None:
@@ -1293,6 +1316,8 @@ class ApplicationSessionManager:
             session.upload_path.unlink(missing_ok=True)
         except Exception:
             pass
+        # Source resume text contains candidate information; release it with the session.
+        session.source_resume_text = ""
 
     def _serialize(self, session: BrowserSession) -> dict:
         return {
