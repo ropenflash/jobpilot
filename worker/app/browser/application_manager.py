@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 
 
 ALLOWED_GREENHOUSE_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io"}
-FIELD_SELECTOR = "input:not([type='hidden']), textarea, select"
+FIELD_SELECTOR = "input:not([type='hidden']), textarea, select, [role='combobox'], [aria-haspopup='listbox']"
 CHALLENGE_TERMS = ("verify you are human", "unusual traffic", "captcha", "robot check", "security check")
 
 
@@ -25,7 +25,48 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _validate_greenhouse_url(value: str) -> str:
+def _match_country_code_option(options: list[dict], phone: str) -> dict | None:
+    """Return one unambiguous option matching an international phone prefix."""
+    if not phone.strip().startswith("+"):
+        return None
+
+    phone_digits = re.sub(r"\\D", "", phone)
+    matches = []
+    for index, option in enumerate(options):
+        value = str(option.get("value") or "").strip()
+        label = str(option.get("text") or "").strip()
+
+        code_match = re.fullmatch(r"\\+?(\\d{1,3})", value)
+        if code_match is None:
+            code_match = re.search(r"\\+\\s*(\\d{1,3})\\b", label)
+        if code_match is None and re.fullmatch(r"\\+?\\d{1,3}", label):
+            code_match = re.fullmatch(r"\\+?(\\d{1,3})", label)
+        if code_match is None:
+            continue
+
+        calling_code = code_match.group(1)
+        if phone_digits.startswith(calling_code) and len(phone_digits) > len(calling_code) + 4:
+            matches.append({
+                **option,
+                "index": option.get("index", index),
+                "calling_code": calling_code,
+            })
+
+    if not matches:
+        return None
+    longest = max(len(item["calling_code"]) for item in matches)
+    best = [item for item in matches if len(item["calling_code"]) == longest]
+    return best[0] if len(best) == 1 else None
+
+
+def _national_number(phone: str, calling_code: str) -> str:
+    digits = re.sub(r"\\D", "", phone)
+    if phone.strip().startswith("+") and digits.startswith(calling_code):
+        return digits[len(calling_code):]
+    return phone.strip()
+
+
+def _validate_greenhouse_url(value: str):
     parsed = urlparse(value)
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_GREENHOUSE_HOSTS:
         raise ApplicationAutomationError("Only HTTPS Greenhouse job postings are supported.")
@@ -40,6 +81,8 @@ def _classify_field(label: str, name: str, input_type: str) -> str:
                                      "sexual orientation", "pronoun", "date of birth",
                                      "citizenship", "work authorization", "sponsorship")):
         return "sensitive_or_eligibility"
+    if any(term in text for term in ("country code", "dial code", "phone code", "telephone code", "mobile code")):
+        return "phone_country_code"
     if input_type == "file" and any(term in text for term in ("resume", "cv")):
         return "resume"
     if "full name" in text or text.strip() in {"name", "candidate name"}:
@@ -77,6 +120,7 @@ class BrowserSession:
     fields: list[dict] = field(default_factory=list)
     missing_required_fields: list[str] = field(default_factory=list)
     message: str | None = None
+    automation_notes: list[str] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -148,7 +192,9 @@ class ApplicationSessionManager:
             elif session.missing_required_fields:
                 session.message = "Complete the remaining required fields in the visible Chromium window, then refresh this review."
             else:
-                session.message = "Contact details and tailored resume are filled. Review the complete form in Chromium before submitting."
+                session.message = "Review the complete form in Chromium before submitting."
+            if session.automation_notes:
+                session.message = (session.message or "") + " " + " ".join(session.automation_notes)
             return self._serialize(session)
         except Exception:
             try:
@@ -309,15 +355,20 @@ class ApplicationSessionManager:
         rows = await frame.locator(FIELD_SELECTOR).evaluate_all("""elements => elements.map((el, index) => {
           const type = (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
           const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
+          const parentLabel = el.closest('label')?.innerText || '';
           const labelledBy = el.getAttribute('aria-labelledby');
           const ariaText = labelledBy ? labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ') : '';
-          const label = (labels.join(' ') || el.getAttribute('aria-label') || ariaText ||
+          const label = (labels.join(' ') || parentLabel || el.getAttribute('aria-label') || ariaText ||
                          el.getAttribute('placeholder') || el.getAttribute('name') || el.id || 'Unlabelled field').trim();
           const required = Boolean(el.required || el.getAttribute('aria-required') === 'true');
           let filled = false;
           if (type === 'file') filled = Boolean(el.files && el.files.length);
           else if (type === 'checkbox' || type === 'radio') filled = Boolean(el.checked);
-          else filled = String(el.value || '').trim().length > 0;
+          else if (el.tagName.toLowerCase() === 'select') filled = Boolean(el.value);
+          else if (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox') {
+            filled = Boolean(el.getAttribute('aria-valuetext') || el.getAttribute('data-value') ||
+                             el.getAttribute('data-selected-value'));
+          } else filled = String(el.value || '').trim().length > 0;
           const options = el.tagName.toLowerCase() === 'select'
             ? Array.from(el.options).filter(o => o.value).map(o => o.textContent.trim()).slice(0, 30) : [];
           return { index, name: el.getAttribute('name') || '', id: el.id || '',
@@ -352,26 +403,123 @@ class ApplicationSessionManager:
 
     async def _autofill(self, session: BrowserSession, career_profile: dict):
         values = self._profile_values(career_profile)
+        selected_calling_code = await self._select_phone_country_code(session, values.get("phone", ""))
+
+        phone_value = values.get("phone", "")
+        if selected_calling_code:
+            phone_value = _national_number(values.get("phone", ""), selected_calling_code)
+            session.automation_notes.append(
+                f"Selected phone country code +{selected_calling_code} from the verified international phone number."
+            )
+        elif any(item["classification"] == "phone_country_code" for item in session.fields):
+            session.automation_notes.append(
+                "Could not safely match the phone country code to the verified phone number; choose it manually."
+            )
+
         for item in session.fields:
             classification = item["classification"]
-            if item["filled"] or item["type"] in {"file", "checkbox", "radio"}:
+            if item["filled"] or item["type"] in {"file", "checkbox", "radio", "select", "button", "div", "span"}:
                 continue
-            value = values.get(classification, "")
+            if classification == "phone_country_code":
+                continue
+            value = phone_value if classification == "phone" else values.get(classification, "")
             if value:
                 try:
                     await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).fill(value)
                 except Exception:
                     continue
 
-        file_fields = [item for item in session.fields
-                       if item["type"] == "file" and item["classification"] == "resume"]
-        if len(file_fields) == 1:
-            try:
-                await session.frame.locator(FIELD_SELECTOR).nth(file_fields[0]["index"]).set_input_files(
-                    str(session.upload_path)
+        await self._upload_resume(session)
+
+    async def _select_phone_country_code(self, session: BrowserSession, phone: str) -> str | None:
+        if not phone.strip().startswith("+"):
+            return None
+
+        controls = [
+            item for item in session.fields
+            if item["classification"] == "phone_country_code" and not item["filled"]
+        ]
+        if len(controls) != 1:
+            return None
+
+        item = controls[0]
+        control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
+        try:
+            if item["type"] == "select":
+                options = await control.locator("option").evaluate_all(
+                    "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
                 )
-            except Exception:
-                session.message = "The resume upload control needs manual attention in Chromium."
+                match = _match_country_code_option(options, phone)
+                if match and match["value"]:
+                    await control.select_option(value=match["value"])
+                    return match["calling_code"]
+                return None
+
+            await control.click()
+            options_locator = session.frame.locator("[role='option']")
+            options = await options_locator.evaluate_all(
+                """elements => elements.map((el, index) => ({
+                    index,
+                    value: el.getAttribute('data-value') || el.getAttribute('value') || '',
+                    text: (el.innerText || el.textContent || '').trim()
+                }))"""
+            )
+            match = _match_country_code_option(options, phone)
+            if match:
+                await options_locator.nth(match["index"]).click()
+                return match["calling_code"]
+        except Exception:
+            return None
+        return None
+
+    async def _upload_resume(self, session: BrowserSession):
+        file_inputs = session.frame.locator("input[type='file']")
+        candidates = []
+        try:
+            count = await file_inputs.count()
+            for index in range(count):
+                candidate = file_inputs.nth(index)
+                metadata = await candidate.evaluate("""el => {
+                    const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
+                    const parentLabel = el.closest('label')?.innerText || '';
+                    const labelledBy = el.getAttribute('aria-labelledby');
+                    const ariaText = labelledBy
+                      ? labelledBy.split(/\\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ')
+                      : '';
+                    return {
+                      label: (labels.join(' ') || parentLabel || el.getAttribute('aria-label') || ariaText ||
+                              el.getAttribute('placeholder') || '').trim(),
+                      name: el.getAttribute('name') || '',
+                      id: el.id || ''
+                    };
+                }""")
+                if _classify_field(metadata["label"], f'{metadata["name"]} {metadata["id"]}', "file") == "resume":
+                    candidates.append(candidate)
+        except Exception:
+            candidates = []
+
+        if len(candidates) != 1:
+            reason = (
+                "No clearly labelled resume upload control was detected."
+                if not candidates else
+                "More than one resume upload control was detected."
+            )
+            session.automation_notes.append(reason + " Attach the tailored PDF manually in Chromium.")
+            return
+
+        try:
+            await candidates[0].set_input_files(str(session.upload_path))
+            attached = await candidates[0].evaluate("el => Boolean(el.files && el.files.length)")
+            if attached:
+                session.automation_notes.append("Tailored PDF attached to the resume upload control.")
+            else:
+                session.automation_notes.append(
+                    "The resume upload control did not confirm the attachment; check it manually in Chromium."
+                )
+        except Exception:
+            session.automation_notes.append(
+                "Could not attach the tailored PDF automatically; attach it manually in Chromium."
+            )
 
     def _missing_required(self, fields: list[dict]) -> list[str]:
         missing = []
@@ -448,6 +596,7 @@ class ApplicationSessionManager:
             "fields": session.fields,
             "missing_required_fields": session.missing_required_fields,
             "message": session.message,
+            "automation_notes": session.automation_notes,
             "updated_at": _utc_now(),
         }
 
