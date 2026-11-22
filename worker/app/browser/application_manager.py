@@ -81,7 +81,10 @@ def _resume_upload_score(metadata: dict) -> int:
         return -1
     if re.search(r"\b(resume|cv|curriculum vitae)\b", " ".join((label, name, element_id)).lower()):
         return 100
-    if ".pdf" in accept.lower() or "application/pdf" in accept.lower():
+    if any(token in accept.lower() for token in (
+        ".pdf", "application/pdf", ".docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )):
         return 20
     return 0
 
