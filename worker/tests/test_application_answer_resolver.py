@@ -4,7 +4,7 @@ from app.agents.application_answer_resolver import (
     _inferred_technology_years,
     resolve_structured_question,
 )
-from app.agents.application_question_reviewer import build_evidence
+from app.agents.application_question_reviewer import build_evidence, review_application_questions
 
 
 class StructuredApplicationAnswerResolverTests(unittest.TestCase):
@@ -162,6 +162,38 @@ class StructuredApplicationAnswerResolverTests(unittest.TestCase):
         self.assertEqual(result["evidence_status"], "manual_review")
         self.assertIsNone(result["suggested_answer"])
         self.assertFalse(result["needs_profile_update"])
+
+
+class StructuredQuestionReviewIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_review_resolves_known_values_and_requests_missing_profile_details(self):
+        fields = [
+            {"index": 0, "label": "Phone", "type": "tel", "required": True, "classification": "phone"},
+            {"index": 1, "label": "Location (City)", "type": "text", "required": True, "classification": "city"},
+            {"index": 2, "label": "How many years of Java development?", "type": "text", "required": True, "classification": "years_java"},
+            {"index": 3, "label": "Current CTC?", "type": "text", "required": True, "classification": "current_ctc"},
+            {"index": 4, "label": "Expected CTC?", "type": "text", "required": True, "classification": "expected_ctc"},
+            {"index": 5, "label": "How soon can you join us?", "type": "text", "required": True, "classification": "join_availability"},
+        ]
+        profile = {
+            "phone": "+91 9876543210",
+            "city": "Greater Noida",
+            "java_experience_years": "8",
+            "current_ctc_lpa": "47",
+            "ctc_currency": "INR",
+        }
+        result = await review_application_questions(fields, profile, {})
+
+        self.assertEqual(result["supported_count"], 4)
+        self.assertEqual(result["not_found_count"], 2)
+        self.assertEqual(result["profile_update_required_count"], 2)
+        by_index = {item["field_index"]: item for item in result["reviews"]}
+        self.assertEqual(by_index[0]["suggested_answer"], "+91 9876543210")
+        self.assertEqual(by_index[1]["suggested_answer"], "Greater Noida")
+        self.assertEqual(by_index[2]["suggested_answer"], "8 years")
+        self.assertEqual(by_index[3]["suggested_answer"], "INR 47 LPA")
+        self.assertIn("expected_ctc_lpa", by_index[4]["profile_fields_needed"])
+        self.assertIn("join_availability", by_index[5]["profile_fields_needed"])
+        self.assertEqual({item["field_index"] for item in result["profile_update_requests"]}, {4, 5})
 
 
 if __name__ == "__main__":
