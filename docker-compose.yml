@@ -1,0 +1,11 @@
+services:
+  mongodb:
+    image: mongo:8
+    container_name: jobpilot-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - jobpilot_data:/data/db
+volumes:
+  jobpilot_data:

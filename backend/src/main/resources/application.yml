@@ -1,0 +1,13 @@
+server:
+  port: ${BACKEND_PORT:8080}
+spring:
+  application:
+    name: jobpilot-backend
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/jobpilot}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
