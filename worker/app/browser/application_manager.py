@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 
 
 ALLOWED_GREENHOUSE_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io"}
-FIELD_SELECTOR = "input:not([type='hidden']), textarea, select, [role='combobox'], [aria-haspopup='listbox']"
+FIELD_SELECTOR = "input:not([type='hidden']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [aria-haspopup='listbox']"
 CHALLENGE_TERMS = ("verify you are human", "unusual traffic", "captcha", "robot check", "security check")
 
 
@@ -105,6 +105,8 @@ def _classify_field(label: str, name: str, input_type: str) -> str:
         return "phone_country_code"
     if input_type == "file" and any(term in text for term in ("resume", "cv")):
         return "resume"
+    if input_type == "checkbox":
+        return "checkbox_review"
     if "full name" in text or text.strip() in {"name", "candidate name"}:
         return "full_name"
     if "first name" in text or text.strip() in {"first", "firstname", "fname"}:
@@ -152,20 +154,25 @@ class ApplicationSessionManager:
         self.headless = os.getenv("JOBPILOT_BROWSER_HEADLESS", "false").lower() in {"1", "true", "yes"}
 
     async def prepare(self, application_id: str, job_url: str, career_profile: dict,
-                      resume_pdf_base64: str) -> dict:
+                      resume_base64: str, resume_filename: str = "tailored-resume.pdf") -> dict:
         _validate_greenhouse_url(job_url)
         await self._expire_stale_sessions()
+        extension = Path(resume_filename).suffix.lower()
+        if extension not in {".pdf", ".docx"}:
+            raise ApplicationAutomationError("The tailored resume must be a PDF or DOCX file.")
         try:
-            pdf_bytes = base64.b64decode(resume_pdf_base64, validate=True)
+            resume_bytes = base64.b64decode(resume_base64, validate=True)
         except Exception as exc:
-            raise ApplicationAutomationError("The tailored PDF payload is invalid.") from exc
-        if not pdf_bytes.startswith(b"%PDF") or len(pdf_bytes) > 12 * 1024 * 1024:
-            raise ApplicationAutomationError("The tailored resume must be a valid PDF under 12 MB.")
+            raise ApplicationAutomationError("The tailored resume payload is invalid.") from exc
+        valid_pdf = extension == ".pdf" and resume_bytes.startswith(b"%PDF")
+        valid_docx = extension == ".docx" and resume_bytes.startswith(b"PK")
+        if not (valid_pdf or valid_docx) or len(resume_bytes) > 12 * 1024 * 1024:
+            raise ApplicationAutomationError("The selected tailored resume is invalid or exceeds 12 MB.")
 
         upload_dir = Path(tempfile.gettempdir()) / "jobpilot-applications"
         upload_dir.mkdir(parents=True, exist_ok=True)
-        upload_path = upload_dir / f"{application_id}.pdf"
-        upload_path.write_bytes(pdf_bytes)
+        upload_path = upload_dir / f"{application_id}{extension}"
+        upload_path.write_bytes(resume_bytes)
 
         playwright = await async_playwright().start()
         try:
@@ -375,7 +382,10 @@ class ApplicationSessionManager:
 
     async def _snapshot_fields(self, frame) -> list[dict]:
         rows = await frame.locator(FIELD_SELECTOR).evaluate_all("""elements => elements.map((el, index) => {
-          const type = (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
+          const role = (el.getAttribute('role') || '').toLowerCase();
+          const nativeType = (el.getAttribute('type') || '').toLowerCase();
+          const type = role === 'checkbox' ? 'checkbox' : role === 'radio' ? 'radio' :
+                       nativeType || el.tagName.toLowerCase();
           const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
           const parentLabel = el.closest('label')?.innerText || '';
           const labelledBy = el.getAttribute('aria-labelledby');
@@ -385,7 +395,9 @@ class ApplicationSessionManager:
           const required = Boolean(el.required || el.getAttribute('aria-required') === 'true');
           let filled = false;
           if (type === 'file') filled = Boolean(el.files && el.files.length);
-          else if (type === 'checkbox' || type === 'radio') filled = Boolean(el.checked);
+          else if (type === 'checkbox' || type === 'radio') {
+            filled = Boolean(el.checked || el.getAttribute('aria-checked') === 'true');
+          }
           else if (el.tagName.toLowerCase() === 'select') filled = Boolean(el.value);
           else if (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox') {
             filled = Boolean(el.getAttribute('aria-valuetext') || el.getAttribute('data-value') ||
@@ -393,8 +405,10 @@ class ApplicationSessionManager:
           } else filled = String(el.value || '').trim().length > 0;
           const options = el.tagName.toLowerCase() === 'select'
             ? Array.from(el.options).filter(o => o.value).map(o => o.textContent.trim()).slice(0, 30) : [];
+          const checked = type === 'checkbox' || type === 'radio'
+            ? Boolean(el.checked || el.getAttribute('aria-checked') === 'true') : null;
           return { index, name: el.getAttribute('name') || '', id: el.id || '',
-                   label: label.slice(0, 180), type, required, filled, options };
+                   label: label.slice(0, 180), type, required, filled, checked, options };
         })""")
         seen_radio_groups = {}
         fields = []
@@ -403,6 +417,7 @@ class ApplicationSessionManager:
                 group = item["name"] or item["label"]
                 if group in seen_radio_groups:
                     seen_radio_groups[group]["filled"] = seen_radio_groups[group]["filled"] or item["filled"]
+                    seen_radio_groups[group]["checked"] = seen_radio_groups[group]["checked"] or item["checked"]
                     continue
                 seen_radio_groups[group] = item
             item["classification"] = _classify_field(item["label"], item["name"], item["type"])
@@ -436,6 +451,13 @@ class ApplicationSessionManager:
         elif any(item["classification"] == "phone_country_code" for item in session.fields):
             session.automation_notes.append(
                 "Could not safely match the phone country code to the verified phone number; choose it manually."
+            )
+
+        checkbox_fields = [item for item in session.fields if item["type"] == "checkbox"]
+        if checkbox_fields:
+            session.automation_notes.append(
+                f"Checkbox review: {len(checkbox_fields)} checkbox field(s) were detected and left for your explicit choice in Chromium. "
+                "JobPilot does not assume consent, eligibility, or screening answers."
             )
 
         for item in session.fields:
