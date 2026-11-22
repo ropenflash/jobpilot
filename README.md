@@ -42,7 +42,8 @@ gcloud auth application-default login
 export GCP_PROJECT="agentos-514612"
 export GCP_LOCATION="global"
 export VERTEX_MODEL="gemini-3.8-flash"
-export VERTEX_MAX_TOKENS=5000
+export VERTEX_MAX_TOKENS=3000
+export VERTEX_JOB_MAX_OUTPUT_TOKENS=4096
 
 python -m uvicorn app.main:app --reload --port 8000
 ```
@@ -95,7 +96,7 @@ Scanned/image-only PDFs are not supported yet; OCR is a future enhancement. AI e
 4. Spring Boot checks that the verified career profile exists and sends the URL plus profile facts (excluding contact identifiers) to the Python worker.
 5. The worker validates the exact Greenhouse host and URL path, then calls the public Greenhouse Job Board API with `content=true`.
 6. The worker converts the returned HTML description into plain text and asks Gemini to extract role requirements and compare them with the career profile.
-7. The worker returns requirement-level evidence. The application calculates a deterministic score: required skills 40%, experience/responsibilities 30%, project evidence 20%, and preferred skills 10%. Categories absent from the job/profile comparison are excluded and the remaining weights are normalized to 100%.
+7. The worker returns requirement-level evidence. The application calculates a deterministic score: required skills 40%, experience/responsibilities 30%, project evidence 20%, and preferred skills 10%. Categories absent from the comparison are excluded and the remaining weights are normalized to total 100%.
 8. Spring Boot saves the job, requirements, score and evidence in MongoDB's `jobs` collection. The same Greenhouse board token and job ID update the existing record rather than creating duplicates.
 9. Review the score breakdown, matched evidence and gaps in the Jobs page. The score is a profile-evidence estimate, not a prediction of hiring success.
 
@@ -121,6 +122,12 @@ curl -X POST http://localhost:8080/api/jobs/analyze \
   -d '{"url":"https://boards.greenhouse.io/{board_token}/jobs/{job_id}"}'
 ```
 Replace the example URL with a currently published public Greenhouse posting.
+
+## Worker unit tests
+From the `worker` directory, with the worker dependencies installed:
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## Security and limitations
 - This is a local-development MVP, not production-hardened.

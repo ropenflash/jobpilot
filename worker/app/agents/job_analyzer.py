@@ -1,4 +1,5 @@
 import json
+import os
 import re
 
 from fastapi import HTTPException
@@ -72,7 +73,6 @@ def _score_evidence(evidence: list[MatchEvidence]) -> tuple[int, list[ScoreBreak
         category: CATEGORY_WEIGHTS[category] / active_weight_total * 100
         for category in active_categories
     }
-    # Largest-remainder allocation makes displayed weight percentages total exactly 100.
     normalized_weights = {
         category: int(raw_weights[category]) for category in active_categories
     }
@@ -173,6 +173,7 @@ VERIFIED CAREER PROFILE:
                 {"role": "user", "content": prompt},
             ],
             json_mode=True,
+            max_output_tokens=int(os.getenv("VERTEX_JOB_MAX_OUTPUT_TOKENS", "4096")),
         )
         parsed = _extract_json(raw)
         requirements = JobRequirements.model_validate(parsed["requirements"])
