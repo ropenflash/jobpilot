@@ -84,6 +84,57 @@ class ApplicationAnswerRagIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["rag"]["job_context_available"])
         self.assertEqual(review["evidence"][0]["source"], "verified_profile")
 
+    async def test_rag_can_recover_explicit_duration_from_tailored_resume_when_profile_has_only_skill(self):
+        fields = [{
+            "index": 0,
+            "label": "How many years of Java development experience do you have?",
+            "type": "text",
+            "required": True,
+            "filled": False,
+            "classification": "years_java",
+        }]
+        profile = {"skills": ["Java"]}
+        tailored_resume = {
+            "summary": "Backend engineer with 10 years of Java development experience."
+        }
+
+        async def model_response(messages, **kwargs):
+            prompt = json.loads(messages[1]["content"])
+            evidence = prompt["questions"][0]["retrieved_evidence"]
+            self.assertTrue(evidence)
+            source = evidence[0]
+            self.assertEqual(source["source"], "tailored_resume")
+            return json.dumps({
+                "reviews": [{
+                    "field_index": 0,
+                    "category": "technical_experience",
+                    "evidence_status": "supported",
+                    "reason": "The tailored resume explicitly states ten years of Java development.",
+                    "evidence_refs": [source["id"]],
+                    "suggested_answer": "10 years",
+                    "profile_improvement": None,
+                }],
+                "profile_improvements": [],
+            })
+
+        with patch(
+            "app.agents.application_question_reviewer.generate_text",
+            new_callable=AsyncMock,
+            side_effect=model_response,
+        ) as generate:
+            result = await review_application_questions(
+                fields,
+                profile,
+                tailored_resume,
+                {},
+            )
+
+        generate.assert_awaited_once()
+        review = result["reviews"][0]
+        self.assertEqual(review["evidence_status"], "supported")
+        self.assertEqual(review["suggested_answer"], "10 years")
+        self.assertEqual(review["evidence"][0]["source"], "tailored_resume")
+
     async def test_job_requirements_alone_never_become_candidate_evidence(self):
         fields = [{
             "index": 1,
