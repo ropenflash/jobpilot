@@ -223,7 +223,31 @@ public class ResumeController {
         }
 
         profile.setResumeId(id);
-        profile.setExtracted(extracted);
+
+        // Preserve candidate-maintained application data when a new master resume is uploaded.
+        Map<String, Object> mergedExtracted = new LinkedHashMap<>(extracted);
+        if (profile.getExtracted() != null) {
+            for (String key : List.of(
+                    "application_answers", "city", "location_city", "linkedin_url", "linkedin",
+                    "github_url", "github", "website", "portfolio_url",
+                    "java_experience_years", "spring_boot_experience_years",
+                    "microservices_experience_years", "kafka_experience_years", "gcp_experience_years",
+                    "official_notice_period", "currently_serving_notice",
+                    "official_last_working_day", "join_availability",
+                    "current_ctc_lpa", "expected_ctc_lpa", "ctc_currency")) {
+                Object existingValue = profile.getExtracted().get(key);
+                Object newValue = mergedExtracted.get(key);
+                boolean newValueIsBlank = newValue == null
+                    || (newValue instanceof String text && text.isBlank())
+                    || (newValue instanceof List<?> list && list.isEmpty());
+                boolean isReusableAnswerHistory = "application_answers".equals(key);
+                if (existingValue != null && (newValueIsBlank || isReusableAnswerHistory)) {
+                    mergedExtracted.put(key, existingValue);
+                }
+            }
+        }
+
+        profile.setExtracted(mergedExtracted);
         profile.setVerified(false);
         profile.setUpdatedAt(Instant.now());
 
@@ -235,7 +259,7 @@ public class ResumeController {
         return Map.of(
             "resumeId", id,
             "fileName", original,
-            "profile", extracted,
+            "profile", mergedExtracted,
             "verified", false
         );
     }
