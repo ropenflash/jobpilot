@@ -49,6 +49,14 @@ type JobAnalysis = {
     }[];
     rationale: string;
   };
+  visual_inspection?: {
+    status: "completed" | "unavailable" | "disabled";
+    screenshots_captured: number;
+    page_title?: string | null;
+    page_headings: string[];
+    findings: string[];
+    note?: string | null;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -132,7 +140,7 @@ export default function JobsPage() {
       const analysis = data as JobAnalysis;
       setSelected(analysis);
       setJobs(current => [analysis, ...current.filter(item => item.id !== analysis.id)]);
-      setMessage("Job retrieved and analyzed. Review the evidence before deciding whether to proceed.");
+      setMessage("Job retrieved and analyzed. Review the visual-inspection status and evidence before proceeding.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Job analysis failed.");
     } finally {
@@ -171,8 +179,9 @@ export default function JobsPage() {
           <div className="text-xs font-semibold tracking-[0.22em] text-cyan-300">JOB INTELLIGENCE</div>
           <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Analyze a job</h1>
           <p className="mt-3 max-w-2xl leading-7 text-slate-400">
-            Paste a public Greenhouse job URL. JobPilot retrieves the posting, extracts requirements
-            and compares them with your verified career profile. Your master profile is not changed.
+            Paste a public Greenhouse job URL. JobPilot retrieves the Greenhouse data, renders the
+            posting in a headless browser, analyzes screenshots with Gemini and compares the role
+            with your verified career profile. Your master profile is not changed.
           </p>
         </header>
 
@@ -192,7 +201,7 @@ export default function JobsPage() {
               disabled={loading || !url.trim() || !verified}
               className="rounded-xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40"
             >
-              {loading ? "Retrieving and analyzing..." : "Analyze job"}
+              {loading ? "Inspecting page and analyzing..." : "Analyze job"}
             </button>
           </div>
           <p className="mt-3 text-xs text-slate-500">
@@ -294,6 +303,43 @@ export default function JobsPage() {
                 </div>
               </article>
             </section>
+
+            {active.visual_inspection && (
+              <section className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                <div className="text-xs font-semibold tracking-[0.18em] text-cyan-300">VISUAL PAGE INSPECTION</div>
+                <h3 className="mt-2 text-lg font-semibold">Gemini screenshot review</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  {active.visual_inspection.status === "completed"
+                    ? `Gemini received ${active.visual_inspection.screenshots_captured} screenshot viewports from the rendered job posting${active.visual_inspection.page_title ? ` (“${active.visual_inspection.page_title}”)` : ""}.`
+                    : active.visual_inspection.status === "disabled"
+                      ? "Visual inspection is disabled in the worker configuration. The job was analyzed from the Greenhouse API text."
+                      : "Browser screenshots were unavailable. The job was analyzed from the Greenhouse API text."}
+                </p>
+                {active.visual_inspection.note && (
+                  <p className="mt-2 text-xs leading-5 text-slate-500">{active.visual_inspection.note}</p>
+                )}
+                <h4 className="mt-4 font-medium">Additional visual findings</h4>
+                {active.visual_inspection.findings.length ? (
+                  <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-300">
+                    {active.visual_inspection.findings.map((finding, index) => <li key={index}>{finding}</li>)}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-500">
+                    {active.visual_inspection.status === "completed"
+                      ? "No additional job-relevant details were found in the screenshots."
+                      : "No visual findings are available for this analysis."}
+                  </p>
+                )}
+                {active.visual_inspection.page_headings.length > 0 && (
+                  <details className="mt-4 border-t border-white/10 pt-3">
+                    <summary className="cursor-pointer text-sm text-slate-400">Rendered page headings</summary>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-400">
+                      {active.visual_inspection.page_headings.map((heading, index) => <li key={index}>{heading}</li>)}
+                    </ul>
+                  </details>
+                )}
+              </section>
+            )}
 
             <section className="mt-5 grid gap-5 md:grid-cols-2">
               <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
