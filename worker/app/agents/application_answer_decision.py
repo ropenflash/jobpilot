@@ -153,13 +153,16 @@ def _same_value(candidate: str, source_value: str) -> bool:
         return False
     if left == right:
         return True
-    if left.isdigit() and right.isdigit():
-        return len(left) >= 6 and right.endswith(left)
-    if left in right or right in left:
-        return True
     left_number = _number(candidate)
     right_number = _number(source_value)
-    return left_number is not None and right_number is not None and left_number == right_number
+    if left_number is not None and right_number is not None:
+        if left_number == right_number:
+            return True
+        # Phone numbers may include a country prefix in one source but not another.
+        if left.isdigit() and right.isdigit():
+            return (len(left) >= 6 and right.endswith(left)) or (len(right) >= 6 and left.endswith(right))
+        return False
+    return left in right or right in left
 
 
 def _profile_supports(
@@ -173,12 +176,27 @@ def _profile_supports(
         {"source": "verified_profile", **entry}
         for entry in entries if _path_matches(entry["path"], aliases)
     ]
-    if classification == "phone_country_code":
+    if classification in {"phone", "phone_country_code"}:
         digits = re.sub(r"\D", "", candidate)
         for entry in related:
             phone_digits = re.sub(r"\D", "", entry["detail"])
-            if digits and phone_digits.startswith(digits):
+            if digits and (
+                phone_digits == digits
+                or phone_digits.startswith(digits)
+                or phone_digits.endswith(digits)
+                or digits.endswith(phone_digits)
+            ):
                 return True, [entry]
+    if classification == "years_spring_boot_microservices":
+        candidate_numbers = {
+            float(value) for value in re.findall(r"(?<!\w)(\d+(?:\.\d+)?)", candidate.replace(",", ""))
+        }
+        matching_components = [
+            item for item in related
+            if _number(item["detail"]) in candidate_numbers
+        ]
+        if len(matching_components) >= 2:
+            return True, matching_components
     if classification == "last_working_day" and _normalize(candidate) == "notcurrentlyservingnotice":
         if any(_normalize(entry["detail"]) in {"no", "false", "0", "notserving"} for entry in related):
             return True, related
@@ -191,7 +209,7 @@ def _profile_supports(
 
     # A candidate value may be a formatted combination of multiple profile facts,
     # such as notice period + serving status + official last working day.
-    if related and classification in {"notice_period", "last_working_day", "years_spring_boot_microservices"}:
+    if related and classification in {"notice_period", "last_working_day"}:
         candidate_number = _number(candidate)
         relevant_numbers = [_number(item["detail"]) for item in related]
         if candidate_number is not None and candidate_number in relevant_numbers:
