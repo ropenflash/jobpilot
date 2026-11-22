@@ -42,6 +42,8 @@ def _classify_field(label: str, name: str, input_type: str) -> str:
         return "sensitive_or_eligibility"
     if input_type == "file" and any(term in text for term in ("resume", "cv")):
         return "resume"
+    if "full name" in text or text.strip() in {"name", "candidate name"}:
+        return "full_name"
     if "first name" in text or text.strip() in {"first", "firstname", "fname"}:
         return "first_name"
     if "last name" in text or text.strip() in {"last", "lastname", "lname", "surname"}:
@@ -117,9 +119,12 @@ class ApplicationSessionManager:
                 await page.wait_for_timeout(1800)
                 frame = await self._find_application_frame(page)
             if frame is None:
-                raise ApplicationAutomationError(
-                    "The Greenhouse application form was not detected. Complete any page prompt manually, then retry."
-                )
+                if await self._has_challenge(page):
+                    frame = page.main_frame
+                else:
+                    raise ApplicationAutomationError(
+                        "The Greenhouse application form was not detected. Check that the job is still active and publicly available."
+                    )
 
             session = BrowserSession(
                 session_id=application_id,
@@ -160,6 +165,12 @@ class ApplicationSessionManager:
         session = self._get_session(session_id)
         async with session.lock:
             await self._touch(session)
+            frame = await self._find_application_frame(session.page)
+            if frame is None:
+                session.status = "NEEDS_USER_INPUT"
+                session.message = "The application form is not available. Review the visible browser before submitting."
+                return self._serialize(session)
+            session.frame = frame
             session.fields = await self._snapshot_fields(session.frame)
             session.missing_required_fields = self._missing_required(session.fields)
             return self._serialize(session)
@@ -168,9 +179,19 @@ class ApplicationSessionManager:
         session = self._get_session(session_id)
         async with session.lock:
             await self._touch(session)
+            frame = await self._find_application_frame(session.page)
+            challenge = await self._has_challenge(session.page)
+            if frame is not None:
+                session.frame = frame
+            elif challenge:
+                session.frame = session.page.main_frame
+            else:
+                session.status = "NEEDS_USER_INPUT"
+                session.message = "The application form is not currently available in the browser. Finish any page prompt and refresh again."
+                return self._serialize(session)
             session.fields = await self._snapshot_fields(session.frame)
             session.missing_required_fields = self._missing_required(session.fields)
-            if await self._has_challenge(session.page):
+            if challenge:
                 session.status = "NEEDS_USER_INPUT"
                 session.message = "Complete the verification prompt manually in Chromium."
             elif session.missing_required_fields:
@@ -228,8 +249,14 @@ class ApplicationSessionManager:
                     "The browser reported an error after the submit action may have started. "
                     "Check Greenhouse manually before retrying."
                 )
-            session.fields = await self._snapshot_fields(session.frame)
-            session.missing_required_fields = self._missing_required(session.fields)
+            refreshed_frame = await self._find_application_frame(session.page)
+            if refreshed_frame is not None:
+                session.frame = refreshed_frame
+                session.fields = await self._snapshot_fields(session.frame)
+                session.missing_required_fields = self._missing_required(session.fields)
+            else:
+                session.fields = []
+                session.missing_required_fields = []
             return self._serialize(session)
 
     async def cancel(self, session_id: str) -> dict:
@@ -307,6 +334,7 @@ class ApplicationSessionManager:
         full_name = str(profile.get("full_name") or "").strip()
         parts = full_name.split()
         return {
+            "full_name": full_name,
             "first_name": parts[0] if parts else "",
             "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
             "email": str(profile.get("email") or "").strip(),
