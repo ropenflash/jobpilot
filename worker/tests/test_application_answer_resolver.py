@@ -168,6 +168,15 @@ class StructuredApplicationAnswerResolverTests(unittest.TestCase):
         self.assertIn("current_ctc_lpa", result["profile_fields_needed"])
         self.assertIsNone(result["suggested_answer"])
 
+    def test_missing_optional_profile_answer_is_a_recommendation_not_a_required_update(self):
+        question = self._question("What is your expected CTC?", "expected_ctc")
+        question["required"] = False
+        result = resolve_structured_question(question, {}, [])
+        self.assertEqual(result["evidence_status"], "not_found")
+        self.assertFalse(result["needs_profile_update"])
+        self.assertEqual(result["profile_fields_needed"], [])
+        self.assertIsNotNone(result["profile_improvement"])
+
     def test_unlabelled_field_is_manual_not_fabricated(self):
         result = resolve_structured_question(
             self._question("Unlabelled field", "unlabelled_field"),
