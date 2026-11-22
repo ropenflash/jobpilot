@@ -73,7 +73,22 @@ class JobMatch(BaseModel):
         return _as_string_list(value)
 
 
+class VisualInspection(BaseModel):
+    status: Literal["completed", "unavailable", "disabled"] = "unavailable"
+    screenshots_captured: int = Field(default=0, ge=0, le=5)
+    page_title: str | None = None
+    page_headings: list[str] = Field(default_factory=list)
+    findings: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+    @field_validator("page_headings", "findings", mode="before")
+    @classmethod
+    def normalize_lists(cls, value: Any) -> Any:
+        return _as_string_list(value)
+
+
 class JobAnalysisResponse(BaseModel):
     job: GreenhouseJob
     requirements: JobRequirements
     match: JobMatch
+    visual_inspection: VisualInspection = Field(default_factory=VisualInspection)
