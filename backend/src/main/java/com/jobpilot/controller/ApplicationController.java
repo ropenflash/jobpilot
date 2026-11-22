@@ -270,6 +270,7 @@ public class ApplicationController {
         record.setApplicationUrl(String.valueOf(result.getOrDefault("application_url", "")));
         record.setStatus(String.valueOf(result.getOrDefault("status", "FAILED")));
         record.setMessage((String) result.get("message"));
+        record.setAutomationNotes(toStringList(result.get("automation_notes")));
         record.setFields(toMapList(result.get("fields")));
         record.setMissingRequiredFields(toStringList(result.get("missing_required_fields")));
         record.setUpdatedAt(Instant.now());
@@ -332,6 +333,8 @@ public class ApplicationController {
         response.put("missingRequiredFields",
             record.getMissingRequiredFields() == null ? List.of() : record.getMissingRequiredFields());
         response.put("message", record.getMessage());
+        response.put("automationNotes",
+            record.getAutomationNotes() == null ? List.of() : record.getAutomationNotes());
         response.put("createdAt", record.getCreatedAt());
         response.put("updatedAt", record.getUpdatedAt());
         response.put("approvedAt", record.getApprovedAt());
