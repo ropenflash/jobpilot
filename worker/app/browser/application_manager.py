@@ -904,6 +904,8 @@ class ApplicationSessionManager:
                 candidate = values.get("expected_ctc_numeric" if input_type == "number" else "expected_ctc", "")
             elif classification == "years_spring_boot_microservices":
                 candidate = values.get("years_spring_boot_microservices", "")
+            elif classification == "experience_range":
+                candidate = values.get("experience_years", "")
             else:
                 candidate = values.get(classification, "")
 
