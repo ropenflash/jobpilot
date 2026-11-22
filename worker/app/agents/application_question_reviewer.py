@@ -33,14 +33,24 @@ def _clean(value: Any) -> str:
 
 
 PRIVATE_PROFILE_KEYS = {
-    "phone", "mobile", "phone_number", "email", "full_name",
-    "city", "location", "location_city", "linkedin_url", "linkedin",
-    "github_url", "github", "website", "portfolio_url",
+    "phone", "mobile", "phone_number", "email", "full_name", "first_name", "last_name",
+    "city", "location", "location_city", "address", "street", "postal_code", "zip",
+    "linkedin_url", "linkedin", "github_url", "github", "website", "portfolio_url",
+    "date_of_birth", "birth_date", "passport", "national_id",
     "official_notice_period", "notice_period", "notice_period_days",
     "currently_serving_notice", "serving_notice",
     "official_last_working_day", "last_working_day", "join_availability", "availability_to_join",
     "current_ctc_lpa", "expected_ctc_lpa", "ctc_currency", "application_answers",
 }
+
+
+def _is_private_evidence(item: dict) -> bool:
+    path_parts = {
+        part.lower()
+        for part in re.split(r"[.\[\]#\d]+", _clean(item.get("path")))
+        if part
+    }
+    return bool(path_parts.intersection(PRIVATE_PROFILE_KEYS))
 
 
 def _flatten_evidence(value: Any, source: str, path: str, output: list[dict]):
@@ -416,14 +426,9 @@ async def review_application_questions(
         }
 
     evidence = build_evidence(career_profile, tailored_resume)
-    ai_evidence = [
-        item for item in evidence
-        if not (
-            item["source"] == "verified_profile"
-            and item["path"].split(".", 1)[0].split("[", 1)[0].split("#", 1)[0].lower()
-            in PRIVATE_PROFILE_KEYS
-        )
-    ]
+    # Personal/contact/compensation fields are handled by deterministic resolvers and
+    # are excluded from the generative prompt regardless of which document they came from.
+    ai_evidence = [item for item in evidence if not _is_private_evidence(item)]
     role_context = build_job_context(job_context)
 
     sensitive = [
@@ -593,7 +598,9 @@ async def review_application_questions(
 
         for question in questions:
             if question["field_index"] not in by_index:
-                by_index[question["field_index"]] = {
+                by_index[question["field_index"]] = structured_fallbacks.get(
+                    question["field_index"]
+                ) or {
                     "field_index": question["field_index"],
                     "question": question["question"],
                     "filled": bool(question.get("filled", False)),
@@ -678,6 +685,8 @@ async def review_application_questions(
         # Deterministic profile and candidate-confirmed saved answers survive an AI outage.
         for item in structured.values():
             by_index[item["field_index"]] = item
+        for field_index, item in structured_fallbacks.items():
+            by_index[field_index] = item
         for item in sensitive:
             by_index[item["field_index"]] = item
         fallback_reviews = [by_index[question["field_index"]] for question in questions]
