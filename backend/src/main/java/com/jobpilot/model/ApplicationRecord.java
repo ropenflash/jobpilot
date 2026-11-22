@@ -22,6 +22,7 @@ public class ApplicationRecord {
     private String message;
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
+    private Instant approvedAt;
     private Instant submittedAt;
 
     public String getId() { return id; }
@@ -50,6 +51,8 @@ public class ApplicationRecord {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public Instant getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(Instant approvedAt) { this.approvedAt = approvedAt; }
     public Instant getSubmittedAt() { return submittedAt; }
     public void setSubmittedAt(Instant submittedAt) { this.submittedAt = submittedAt; }
 }
