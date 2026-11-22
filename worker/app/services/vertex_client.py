@@ -1,3 +1,4 @@
+import base64
 import os
 
 import httpx
@@ -6,6 +7,9 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.auth.transport.requests import Request
 
 CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+SUPPORTED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_INLINE_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_INLINE_IMAGES = 5
 
 
 class VertexError(RuntimeError):
@@ -38,7 +42,7 @@ def _access_token() -> str:
         credentials.refresh(Request())
     except DefaultCredentialsError as exc:
         raise VertexError(
-            "GCP credentials are not available. Run \`gcloud auth application-default login\`."
+            "GCP credentials are not available. Run gcloud auth application-default login."
         ) from exc
     if not credentials.token:
         raise VertexError("GCP credentials did not return an access token.")
@@ -58,11 +62,38 @@ def _endpoint(model: str) -> str:
     )
 
 
+def _encode_images(images: list[tuple[str, bytes]] | None) -> list[dict]:
+    if not images:
+        return []
+    if len(images) > MAX_INLINE_IMAGES:
+        raise ValueError(f"At most {MAX_INLINE_IMAGES} screenshots can be sent to Vertex AI.")
+
+    total_bytes = 0
+    parts = []
+    for mime_type, content in images:
+        if mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
+            raise ValueError(f"Unsupported image MIME type: {mime_type}")
+        if not isinstance(content, bytes) or not content:
+            raise ValueError("Image content must be non-empty bytes.")
+        total_bytes += len(content)
+        parts.append({
+            "inlineData": {
+                "mimeType": mime_type,
+                "data": base64.b64encode(content).decode("ascii"),
+            }
+        })
+
+    if total_bytes > MAX_INLINE_IMAGE_BYTES:
+        raise ValueError("Combined inline image content exceeds the 12 MB limit.")
+    return parts
+
+
 def _payload(
     messages: list[dict],
     *,
     json_mode: bool,
     max_output_tokens: int | None = None,
+    images: list[tuple[str, bytes]] | None = None,
 ) -> dict:
     system_parts: list[str] = []
     contents: list[dict] = []
@@ -79,6 +110,16 @@ def _payload(
         })
     if not contents:
         contents.append({"role": "user", "parts": [{"text": "Continue."}]})
+
+    image_parts = _encode_images(images)
+    if image_parts:
+        target = next(
+            (item for item in reversed(contents) if item["role"] == "user"),
+            None,
+        )
+        if target is None:
+            raise ValueError("Images can only be attached to a user message.")
+        target["parts"].extend(image_parts)
 
     generation_config: dict = {
         "temperature": 0.2,
@@ -122,8 +163,15 @@ async def generate_text(
     *,
     json_mode: bool = False,
     max_output_tokens: int | None = None,
+    images: list[tuple[str, bytes]] | None = None,
 ) -> str:
     chosen_model = model or model_name()
+    request_payload = _payload(
+        messages,
+        json_mode=json_mode,
+        max_output_tokens=max_output_tokens,
+        images=images,
+    )
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
@@ -132,11 +180,7 @@ async def generate_text(
                     "Authorization": f"Bearer {_access_token()}",
                     "Content-Type": "application/json",
                 },
-                json=_payload(
-                    messages,
-                    json_mode=json_mode,
-                    max_output_tokens=max_output_tokens,
-                ),
+                json=request_payload,
             )
             response.raise_for_status()
             return _read_text(response.json())
