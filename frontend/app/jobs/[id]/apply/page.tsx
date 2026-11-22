@@ -9,6 +9,7 @@ type TailoredResume = {
   id: string;
   jobTitle: string;
   company: string;
+  resumeStyle?: string;
   createdAt: string;
 };
 
@@ -17,13 +18,18 @@ type ApplicationField = {
   type: string;
   required: boolean;
   filled: boolean;
+  checked?: boolean | null;
   classification: string;
+  index?: number;
+  name?: string;
+  id?: string;
 };
 
 type Application = {
   id: string;
   jobId: string;
   tailoredResumeId: string;
+  resumeFormat?: "pdf" | "docx";
   jobTitle: string;
   company: string;
   applicationUrl: string;
@@ -70,6 +76,7 @@ export default function ApplyPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [resumes, setResumes] = useState<TailoredResume[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState("");
+  const [selectedFormat, setSelectedFormat] = useState<"pdf" | "docx">("pdf");
   const [application, setApplication] = useState<Application | null>(null);
   const [confirmReviewed, setConfirmReviewed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -113,7 +120,7 @@ export default function ApplyPage() {
       const response = await fetch(API + "/api/jobs/" + encodeURIComponent(jobId) + "/applications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tailoredResumeId: selectedResumeId }),
+        body: JSON.stringify({ tailoredResumeId: selectedResumeId, format: selectedFormat }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(responseMessage(data, "Could not start the application."));
@@ -213,7 +220,7 @@ export default function ApplyPage() {
           {job && <p className="mt-3 text-slate-400">{job.job.title} · {job.job.company}{job.job.location ? " · " + job.job.location : ""}</p>}
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
             JobPilot opens a visible Chromium window, fills only clearly identified contact fields from your verified profile,
-            and uploads the selected tailored PDF. Complete screening questions yourself in the browser.
+            and uploads the selected tailored PDF or Word document. Complete screening questions yourself in the browser.
             Nothing is submitted until you review the form and explicitly confirm here.
           </p>
         </header>
@@ -241,11 +248,46 @@ export default function ApplyPage() {
                       <span className="min-w-0">
                         <span className="block font-medium">{resume.jobTitle} · {resume.company}</span>
                         <span className="mt-1 block text-xs text-slate-400">
-                          Version {resumes.length - index} · {new Date(resume.createdAt).toLocaleString()}
+                          Version {resumes.length - index} · {resume.resumeStyle ?? "ATS Classic"} · {new Date(resume.createdAt).toLocaleString()}
                         </span>
                       </span>
                     </label>
                   ))}
+                </div>
+                <div className="mt-5">
+                  <h3 className="text-sm font-semibold">Resume file to attach</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className={"flex cursor-pointer items-start gap-3 rounded-xl border p-4 " + (
+                      selectedFormat === "pdf" ? "border-cyan-300/50 bg-cyan-300/10" : "border-white/10"
+                    )}>
+                      <input
+                        type="radio"
+                        name="resumeFormat"
+                        value="pdf"
+                        checked={selectedFormat === "pdf"}
+                        onChange={() => setSelectedFormat("pdf")}
+                      />
+                      <span>
+                        <span className="block font-medium">PDF</span>
+                        <span className="mt-1 block text-xs text-slate-400">Recommended for most ATS portals.</span>
+                      </span>
+                    </label>
+                    <label className={"flex cursor-pointer items-start gap-3 rounded-xl border p-4 " + (
+                      selectedFormat === "docx" ? "border-cyan-300/50 bg-cyan-300/10" : "border-white/10"
+                    )}>
+                      <input
+                        type="radio"
+                        name="resumeFormat"
+                        value="docx"
+                        checked={selectedFormat === "docx"}
+                        onChange={() => setSelectedFormat("docx")}
+                      />
+                      <span>
+                        <span className="block font-medium">Word (.docx)</span>
+                        <span className="mt-1 block text-xs text-slate-400">Choose when the employer accepts Word documents.</span>
+                      </span>
+                    </label>
+                  </div>
                 </div>
                 <button
                   onClick={startApplication}
@@ -280,6 +322,9 @@ export default function ApplyPage() {
                 )}
               </div>
               <p className="mt-4 text-sm leading-6 text-slate-300">{application.message}</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Attached resume format: {(application.resumeFormat ?? "pdf").toUpperCase()}
+              </p>
               {!!application.automationNotes?.length && (
                 <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
                   <h3 className="text-sm font-semibold text-amber-100">Automation notes</h3>
@@ -316,13 +361,36 @@ export default function ApplyPage() {
             <section className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
               <h2 className="text-lg font-semibold">Form field checklist</h2>
               <p className="mt-1 text-sm text-slate-400">JobPilot stores labels and completion flags only; it does not copy your entered answers into this checklist.</p>
+              {application.fields.some(field => field.type === "checkbox") && (
+                <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm leading-6 text-amber-100">
+                  Checkbox choices are read from the live Greenhouse form. JobPilot will not auto-check consent,
+                  eligibility, demographic or screening answers. Choose only options that are true for you in Chromium,
+                  then refresh this review. Any required unchecked checkbox blocks submission.
+                </div>
+              )}
               <div className="mt-4 space-y-2">
                 {application.fields.map((field, index) => (
-                  <div key={field.label + index} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 px-4 py-3">
-                    <span className="text-sm text-slate-200">{field.label}{field.required ? <span className="text-rose-300"> *</span> : ""}</span>
-                    <span className={"text-xs font-medium " + (field.filled ? "text-emerald-300" : field.required ? "text-amber-200" : "text-slate-500")}>
-                      {field.filled ? "Detected as complete" : field.required ? "Needs attention" : "Optional / blank"}
+                  <div key={(field.id || field.name || field.label) + index} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 px-4 py-3">
+                    <span className="min-w-0 text-sm text-slate-200">
+                      {field.label}{field.required ? <span className="text-rose-300"> *</span> : ""}
+                      {field.type === "checkbox" && (
+                        <span className="mt-1 block text-xs text-slate-500">
+                          {field.classification === "sensitive_or_eligibility" ? "Sensitive / eligibility choice" : "Checkbox"}
+                        </span>
+                      )}
                     </span>
+                    {field.type === "checkbox" ? (
+                      <span className={"inline-flex items-center gap-2 text-xs font-medium " + (
+                        field.filled ? "text-emerald-300" : field.required ? "text-amber-200" : "text-slate-500"
+                      )}>
+                        <input type="checkbox" checked={Boolean(field.filled)} readOnly disabled />
+                        {field.filled ? "Checked in Chromium" : field.required ? "Required — unchecked" : "Not checked"}
+                      </span>
+                    ) : (
+                      <span className={"text-xs font-medium " + (field.filled ? "text-emerald-300" : field.required ? "text-amber-200" : "text-slate-500")}>
+                        {field.filled ? "Detected as complete" : field.required ? "Needs attention" : "Optional / blank"}
+                      </span>
+                    )}
                   </div>
                 ))}
                 {!application.fields.length && <p className="text-sm text-slate-500">No form fields were returned. Check the open browser or start a new session.</p>}
