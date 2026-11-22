@@ -476,6 +476,7 @@ async def review_application_questions(
             by_index[question["field_index"]] = sensitive_match or {
                 "field_index": question["field_index"],
                 "question": question["question"],
+                "filled": bool(question.get("filled", False)),
                 "category": "unknown",
                 "evidence_status": "not_reviewed",
                 "reason": "AI question review is unavailable. Do not infer an answer; check your profile and resume manually.",
