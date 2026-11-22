@@ -357,9 +357,9 @@ export default function ApplyPage() {
           <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Review and apply</h1>
           {job && <p className="mt-3 text-slate-400">{job.job.title} · {job.job.company}{job.job.location ? " · " + job.job.location : ""}</p>}
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-            JobPilot opens a visible Chromium window, fills only clearly identified contact fields from your verified profile,
-            and uploads the selected tailored PDF or Word document. Complete screening questions yourself in the browser.
-            Nothing is submitted until you review the form and explicitly confirm here.
+            JobPilot opens a visible Chromium window, fills fields supported by your verified profile and previously saved answers,
+            and uploads the selected tailored PDF or Word document. When a question is new or missing an answer, you can add it
+            to your profile from the review panel. Nothing is submitted until you review the form and explicitly confirm here.
           </p>
         </header>
 
@@ -580,7 +580,7 @@ export default function ApplyPage() {
                   <div>
                     <h2 className="text-lg font-semibold">Question-to-profile match</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-400">
-                      JobPilot compares application questions with your verified profile and tailored resume, resolves structured facts where possible, and identifies missing details. Suggested answers are drafts only; they are never entered automatically.
+                      JobPilot compares questions with your verified profile and tailored resume. AI-generated drafts stay review-only; answers you explicitly save in your profile can be reused for matching questions on future applications.
                     </p>
                   </div>
                   <span className="rounded-full border border-violet-300/30 bg-violet-300/10 px-3 py-1 text-xs font-medium text-violet-200">
