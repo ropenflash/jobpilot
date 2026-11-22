@@ -200,7 +200,7 @@ export default function ApplyPage() {
     return <main className="min-h-screen px-6 py-10"><div className="mx-auto max-w-5xl text-slate-400">Loading application workspace...</div></main>;
   }
 
-  const terminal = ["SUBMITTED", "SUBMISSION_UNKNOWN", "CANCELLED", "FAILED", "EXPIRED"].includes(application?.status ?? "");
+  const terminal = ["SUBMITTING", "SUBMITTED", "SUBMISSION_UNKNOWN", "CANCELLED", "FAILED", "EXPIRED"].includes(application?.status ?? "");
 
   return (
     <main className="min-h-screen px-6 py-10 md:px-12">
@@ -296,7 +296,7 @@ export default function ApplyPage() {
                     Close browser without submitting
                   </button>
                 )}
-                {terminal && application.status !== "SUBMITTED" && application.status !== "SUBMISSION_UNKNOWN" && (
+                {["CANCELLED", "FAILED", "EXPIRED"].includes(application.status) && (
                   <button onClick={() => { setApplication(null); setNotice(""); setError(""); }} className="rounded-xl border border-white/20 px-4 py-2.5 text-sm font-semibold">
                     Start a new session
                   </button>
@@ -350,6 +350,12 @@ export default function ApplyPage() {
               </section>
             )}
 
+            {application.status === "SUBMITTING" && (
+              <section className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/5 p-5 text-sm leading-6 text-amber-100">
+                Submission is in progress or awaiting confirmation. Do not start another submission. Check the open Chromium
+                window, then reload this page to retrieve the saved status.
+              </section>
+            )}
             {application.status === "SUBMISSION_UNKNOWN" && (
               <section className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/5 p-5 text-sm leading-6 text-amber-100">
                 Do not click submit again yet. Check the Greenhouse page and your email for confirmation first. JobPilot will not automatically retry an uncertain submission.
