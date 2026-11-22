@@ -174,7 +174,7 @@ def _profile_supports(
         for entry in entries if _path_matches(entry["path"], aliases)
     ]
     if classification == "phone_country_code":
-        digits = re.sub(r"\\D", "", candidate)
+        digits = re.sub(r"\D", "", candidate)
         for entry in related:
             phone_digits = re.sub(r"\\D", "", entry["detail"])
             if digits and phone_digits.startswith(digits):
@@ -262,16 +262,18 @@ def _resume_conflicts(classification: str, candidate: str, resume: dict | None) 
     aliases = RESUME_CONFLICT_KEYS.get(classification, ())
     related = [item for item in entries if _path_matches(item["path"], aliases)]
     conflicts = []
+    candidate_numbers = {
+        float(value) for value in re.findall(r"(?<!\\w)(\\d+(?:\\.\\d+)?)", candidate.replace(",", ""))
+    }
     for item in related:
         value = item["detail"]
         if not value or _same_value(candidate, value):
             continue
-        # Only compare numeric facts when both values are explicitly numeric. For
-        # free text, compare contact/identity/location fields exactly.
-        candidate_number = _number(candidate)
+        # Combined answers (e.g. Spring Boot + Microservices tenure) can contain
+        # multiple independently supported numeric values.
         resume_number = _number(value)
-        if candidate_number is not None and resume_number is not None:
-            if candidate_number != resume_number and classification in RANGE_CLASSIFICATIONS | {"experience_range"}:
+        if resume_number is not None:
+            if resume_number not in candidate_numbers and classification in RANGE_CLASSIFICATIONS:
                 conflicts.append({"source": "tailored_resume", **item})
         elif classification in {"full_name", "first_name", "last_name", "email", "phone", "linkedin", "github", "website", "city", "country"}:
             if _normalize(candidate) != _normalize(value):
@@ -292,7 +294,10 @@ def _resume_conflicts(classification: str, candidate: str, resume: dict | None) 
                 if match:
                     resume_years = float(match.group(1))
                     candidate_years = _number(candidate)
-                    if candidate_years is not None and candidate_years != resume_years:
+                    candidate_year_numbers = {
+                        float(value) for value in re.findall(r"(?<!\\w)(\\d+(?:\\.\\d+)?)", candidate.replace(",", ""))
+                    }
+                    if candidate_years is not None and resume_years not in candidate_year_numbers:
                         conflicts.append({
                             "source": "tailored_resume",
                             "path": item["path"],
