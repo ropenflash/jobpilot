@@ -2,6 +2,7 @@ import unittest
 
 from app.agents.application_answer_resolver import (
     _inferred_technology_years,
+    resolve_saved_application_answer,
     resolve_structured_question,
 )
 from app.agents.application_question_reviewer import build_evidence, review_application_questions
@@ -177,6 +178,77 @@ class StructuredApplicationAnswerResolverTests(unittest.TestCase):
         self.assertEqual(result["profile_fields_needed"], [])
         self.assertIsNotNone(result["profile_improvement"])
 
+    def test_saved_answers_match_by_reusable_question_category(self):
+        profile = {
+            "application_answers": [{
+                "id": "saved-1",
+                "question": "How many years of experience do you have in Java development?",
+                "normalized_question": "how many years of experience do you have in java development",
+                "answer": "8 years",
+                "classification": "years_java",
+                "candidate_confirmed": True,
+                "updated_at": "2026-11-23T10:00:00Z",
+            }]
+        }
+        result = resolve_saved_application_answer(
+            self._question("Years of Java experience?", "years_java"),
+            profile,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["suggested_answer"], "8 years")
+        self.assertTrue(result["saved_profile_answer"])
+        self.assertEqual(result["evidence"][0]["source"], "saved_application_answer")
+
+    def test_saved_custom_answers_require_an_exact_or_very_close_question_match(self):
+        profile = {
+            "application_answers": [{
+                "question": "Why do you want to work for this company?",
+                "normalized_question": "why do you want to work for this company",
+                "answer": "I am interested in the product and engineering challenges.",
+                "classification": "manual",
+                "candidate_confirmed": True,
+            }]
+        }
+        exact = resolve_saved_application_answer(
+            self._question("Why do you want to work for this company!", "manual"),
+            profile,
+        )
+        unrelated = resolve_saved_application_answer(
+            self._question("Describe your leadership experience.", "manual"),
+            profile,
+        )
+        self.assertEqual(exact["suggested_answer"], "I am interested in the product and engineering challenges.")
+        self.assertIsNone(unrelated)
+
+    def test_unconfirmed_answers_and_sensitive_questions_are_never_reused(self):
+        profile = {
+            "application_answers": [{
+                "question": "How soon can you join?",
+                "normalized_question": "how soon can you join",
+                "answer": "Immediately",
+                "classification": "join_availability",
+                "candidate_confirmed": False,
+            }]
+        }
+        not_confirmed = resolve_saved_application_answer(
+            self._question("When can you join?", "join_availability"),
+            profile,
+        )
+        sensitive = resolve_saved_application_answer(
+            self._question("Are you legally authorized to work?", "sensitive_or_eligibility"),
+            {
+                "application_answers": [{
+                    "question": "Are you legally authorized to work?",
+                    "normalized_question": "are you legally authorized to work",
+                    "answer": "Yes",
+                    "classification": "manual",
+                    "candidate_confirmed": True,
+                }]
+            },
+        )
+        self.assertIsNone(not_confirmed)
+        self.assertIsNone(sensitive)
+
     def test_unlabelled_field_is_manual_not_fabricated(self):
         result = resolve_structured_question(
             self._question("Unlabelled field", "unlabelled_field"),
@@ -189,6 +261,30 @@ class StructuredApplicationAnswerResolverTests(unittest.TestCase):
 
 
 class StructuredQuestionReviewIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_saved_application_answer_is_reused_for_a_later_job_question(self):
+        fields = [{
+            "index": 0,
+            "label": "How many years of experience do you have in Java development?",
+            "type": "text",
+            "required": True,
+            "filled": False,
+            "classification": "years_java",
+        }]
+        profile = {
+            "application_answers": [{
+                "question": "How many years of experience do you have in Java development?",
+                "normalized_question": "how many years of experience do you have in java development",
+                "answer": "8 years",
+                "classification": "years_java",
+                "candidate_confirmed": True,
+                "updated_at": "2026-11-23T10:00:00Z",
+            }]
+        }
+        result = await review_application_questions(fields, profile, {})
+        self.assertEqual(result["supported_count"], 1)
+        self.assertTrue(result["reviews"][0]["saved_profile_answer"])
+        self.assertEqual(result["reviews"][0]["suggested_answer"], "8 years")
+
     async def test_review_resolves_known_values_and_requests_missing_profile_details(self):
         fields = [
             {"index": 0, "label": "Phone", "type": "tel", "required": True, "classification": "phone"},
