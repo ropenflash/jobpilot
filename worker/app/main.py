@@ -200,6 +200,7 @@ async def prepare_application(request: PrepareApplicationRequest):
             resume_filename=request.tailored_resume_filename,
             tailored_resume=request.tailored_resume,
             job_context=request.job_context,
+            source_resume_base64=request.source_resume_base64,
         )
     except ApplicationAutomationError as exc:
         raise _application_error(exc) from exc
