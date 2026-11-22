@@ -16,6 +16,14 @@ from app.agents.application_answer_rag import (
 MAX_QUESTIONS = 25
 MAX_EVIDENCE_ITEMS = 500
 MAX_EVIDENCE_CHARS = 900
+RAG_FALLBACK_CLASSIFICATIONS = {
+    "years_java",
+    "years_spring_boot",
+    "years_spring_boot_microservices",
+    "years_microservices",
+    "years_kafka",
+    "years_gcp",
+}
 
 
 def _clean(value: Any) -> str:
@@ -428,6 +436,7 @@ async def review_application_questions(
         if question["classification"] in {"sensitive_or_eligibility", "checkbox_review"}
     ]
     structured = {}
+    structured_fallbacks = {}
     for question in questions:
         resolved = resolve_structured_question(question, career_profile, evidence)
         saved_answer = resolve_saved_application_answer(question, career_profile)
@@ -436,7 +445,15 @@ async def review_application_questions(
         ):
             resolved = saved_answer
         if resolved is not None:
-            structured[question["field_index"]] = resolved
+            if (
+                resolved.get("evidence_status") != "supported"
+                and question["classification"] in RAG_FALLBACK_CLASSIFICATIONS
+            ):
+                # A missing deterministic duration can still be stated explicitly in the
+                # tailored resume. Let RAG inspect it, but never infer years from a skill keyword.
+                structured_fallbacks[question["field_index"]] = resolved
+            else:
+                structured[question["field_index"]] = resolved
         elif question["classification"] == "unlabelled_field":
             structured[question["field_index"]] = resolve_structured_question(
                 {**question, "classification": "unlabelled_field"}, career_profile, evidence
@@ -456,7 +473,9 @@ async def review_application_questions(
         for item in sensitive:
             by_index[item["field_index"]] = item
         for question in reviewable:
-            by_index[question["field_index"]] = _missing_evidence_review(
+            by_index[question["field_index"]] = structured_fallbacks.get(
+                question["field_index"]
+            ) or _missing_evidence_review(
                 question,
                 "No usable professional evidence was available in the verified profile or tailored resume to support an answer.",
             )
@@ -561,7 +580,9 @@ async def review_application_questions(
             by_index = {}
 
         for question in no_context_questions:
-            by_index[question["field_index"]] = _missing_evidence_review(
+            by_index[question["field_index"]] = structured_fallbacks.get(
+                question["field_index"]
+            ) or _missing_evidence_review(
                 question,
                 "JobPilot searched the verified profile and tailored resume but could not retrieve relevant candidate evidence for this question. Add an accurate project or experience detail, or answer manually.",
             )
