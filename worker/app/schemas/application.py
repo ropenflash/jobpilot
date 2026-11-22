@@ -7,6 +7,7 @@ class PrepareApplicationRequest(BaseModel):
     career_profile: dict = Field(min_length=1)
     tailored_resume_base64: str = Field(min_length=16)
     tailored_resume_filename: str = Field(default="tailored-resume.pdf", min_length=1, max_length=160)
+    tailored_resume: dict = Field(default_factory=dict)
 
 
 class SubmitApplicationRequest(BaseModel):

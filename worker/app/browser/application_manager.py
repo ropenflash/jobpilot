@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
+from app.agents.application_question_reviewer import review_application_questions
+
 
 ALLOWED_GREENHOUSE_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io"}
 FIELD_SELECTOR = "input:not([type='hidden']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [aria-haspopup='listbox']"
@@ -175,7 +177,9 @@ class BrowserSession:
     frame: object
     upload_path: Path
     career_profile: dict = field(default_factory=dict)
+    tailored_resume: dict = field(default_factory=dict)
     form_verification: dict = field(default_factory=dict)
+    question_review: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_activity: float = field(default_factory=time.monotonic)
     status: str = "BROWSER_OPEN"
@@ -195,7 +199,8 @@ class ApplicationSessionManager:
         self.headless = os.getenv("JOBPILOT_BROWSER_HEADLESS", "false").lower() in {"1", "true", "yes"}
 
     async def prepare(self, application_id: str, job_url: str, career_profile: dict,
-                      resume_base64: str, resume_filename: str = "tailored-resume.pdf") -> dict:
+                      resume_base64: str, resume_filename: str = "tailored-resume.pdf",
+                      tailored_resume: dict | None = None) -> dict:
         _validate_greenhouse_url(job_url)
         await self._expire_stale_sessions()
         extension = Path(resume_filename).suffix.lower()
@@ -248,6 +253,7 @@ class ApplicationSessionManager:
                 frame=frame,
                 upload_path=upload_path,
                 career_profile=career_profile,
+                tailored_resume=tailored_resume or {},
                 application_url=page.url,
             )
             self.sessions[application_id] = session
@@ -435,9 +441,10 @@ class ApplicationSessionManager:
             : '';
           const labelledBy = el.getAttribute('aria-labelledby');
           const ariaText = labelledBy ? labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ') : '';
-          const label = (labels.join(' ') || parentLabel || el.getAttribute('aria-label') || ariaText ||
-                         fieldsetLabel || wrapperLabel || el.getAttribute('placeholder') ||
-                         el.getAttribute('name') || el.id || 'Unlabelled field').trim();
+          const label = (fieldsetLabel || wrapperLabel || ariaText ||
+                         el.getAttribute('aria-label') || labels.join(' ') || parentLabel ||
+                         el.getAttribute('placeholder') || el.getAttribute('name') ||
+                         el.id || 'Unlabelled field').trim();
           const required = Boolean(el.required || el.getAttribute('aria-required') === 'true');
           let filled = false;
           if (type === 'file') filled = Boolean(el.files && el.files.length);
@@ -450,7 +457,10 @@ class ApplicationSessionManager:
                              el.getAttribute('data-selected-value'));
           } else filled = String(el.value || '').trim().length > 0;
           const options = el.tagName.toLowerCase() === 'select'
-            ? Array.from(el.options).filter(o => o.value).map(o => o.textContent.trim()).slice(0, 30) : [];
+            ? Array.from(el.options).filter(o => o.value).map(o => ({value: o.value, text: o.textContent.trim()})).slice(0, 30)
+            : type === 'radio'
+              ? [{value: String(el.value || ''), text: (labels.join(' ') || parentLabel || el.getAttribute('aria-label') || '').trim()}]
+              : [];
           const checked = type === 'checkbox' || type === 'radio'
             ? Boolean(el.checked || el.getAttribute('aria-checked') === 'true') : null;
           return { index, name: el.getAttribute('name') || '', id: el.id || '',
@@ -462,9 +472,13 @@ class ApplicationSessionManager:
             if item["type"] == "radio":
                 group = item["name"] or item["label"]
                 if group in seen_radio_groups:
-                    seen_radio_groups[group]["filled"] = seen_radio_groups[group]["filled"] or item["filled"]
-                    seen_radio_groups[group]["checked"] = seen_radio_groups[group]["checked"] or item["checked"]
+                    existing = seen_radio_groups[group]
+                    existing["filled"] = existing["filled"] or item["filled"]
+                    existing["checked"] = existing["checked"] or item["checked"]
+                    existing["required"] = existing["required"] or item["required"]
+                    existing["options"].extend(item.get("options") or [])
                     continue
+                item["options"] = list(item.get("options") or [])
                 seen_radio_groups[group] = item
             item["classification"] = _classify_field(item["label"], item["name"], item["type"])
             fields.append(item)
@@ -480,7 +494,7 @@ class ApplicationSessionManager:
             if profile.get("total_experience_years") is not None
             else profile.get("years_of_experience") or ""
         ).strip()
-        years_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:years?)?", explicit_years, re.I)
+        years_match = re.match(r"^\s*(\d+(?:\.\d+)?)", explicit_years, re.I)
         experience_years = float(years_match.group(1)) if years_match else None
 
         return {
@@ -642,6 +656,19 @@ class ApplicationSessionManager:
             f"Form verification: completed 3/3 observe-and-verify passes; {outcome}. "
             "Only values from the verified profile were autofilled. Screening, eligibility, consent and unclear fields remain manual."
         )
+
+        # Review visible questions against source evidence only after safe autofill and
+        # browser re-snapshots have settled. This is advisory and never submits answers.
+        session.question_review = await review_application_questions(
+            session.fields,
+            session.career_profile,
+            getattr(session, "tailored_resume", {}),
+        )
+        if session.question_review.get("status") == "unavailable":
+            self._add_note(
+                session,
+                "Question-to-profile review is unavailable right now; inspect the resume and profile manually before answering."
+            )
 
     def _add_note(self, session: BrowserSession, note: str):
         if note not in session.automation_notes:
@@ -909,6 +936,7 @@ class ApplicationSessionManager:
             "message": session.message,
             "automation_notes": session.automation_notes,
             "form_verification": session.form_verification,
+            "question_review": session.question_review,
             "updated_at": _utc_now(),
         }
 

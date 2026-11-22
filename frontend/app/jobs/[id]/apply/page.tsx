@@ -38,6 +38,40 @@ type FormVerification = {
   }>;
 };
 
+type QuestionEvidence = {
+  source: string;
+  path: string;
+  detail: string;
+};
+
+type QuestionReviewItem = {
+  field_index: number;
+  question: string;
+  category: string;
+  evidence_status: "supported" | "partial" | "not_found" | "manual_review" | "not_reviewed";
+  reason: string;
+  evidence: QuestionEvidence[];
+  suggested_answer?: string | null;
+  profile_improvement?: string | null;
+};
+
+type QuestionReview = {
+  status: "completed" | "unavailable";
+  questions_reviewed: number;
+  supported_count: number;
+  partial_count: number;
+  not_found_count: number;
+  manual_review_count: number;
+  reviews: QuestionReviewItem[];
+  profile_improvements: Array<{
+    field_index: number;
+    question: string;
+    recommendation: string;
+    priority: "high" | "medium";
+  }>;
+  message?: string;
+};
+
 type Application = {
   id: string;
   jobId: string;
@@ -52,6 +86,7 @@ type Application = {
   message: string | null;
   automationNotes?: string[];
   formVerification?: FormVerification;
+  questionReview?: QuestionReview;
   createdAt: string;
   updatedAt: string;
   submittedAt?: string | null;
@@ -72,6 +107,14 @@ function responseMessage(data: any, fallback: string) {
     }
   }
   return data?.message ?? fallback;
+}
+
+function questionStatusStyle(status: string) {
+  if (status === "supported") return "border-emerald-300/30 bg-emerald-300/10 text-emerald-200";
+  if (status === "partial") return "border-amber-300/30 bg-amber-300/10 text-amber-200";
+  if (status === "not_found") return "border-rose-300/30 bg-rose-300/10 text-rose-200";
+  if (status === "manual_review") return "border-slate-300/20 bg-white/[0.05] text-slate-300";
+  return "border-white/15 bg-white/[0.04] text-slate-400";
 }
 
 function statusStyle(status: string) {
@@ -450,6 +493,98 @@ export default function ApplyPage() {
               )}
             </section>
 
+            {application.questionReview && Array.isArray(application.questionReview.reviews) && (
+              <section className="mt-5 rounded-2xl border border-violet-300/20 bg-violet-300/[0.04] p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Question-to-profile match</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-400">
+                      JobPilot compares each visible application question with evidence in your verified career profile and tailored resume.
+                      Suggested answers are drafts only; they are never entered or submitted automatically.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-violet-300/30 bg-violet-300/10 px-3 py-1 text-xs font-medium text-violet-200">
+                    {application.questionReview.questions_reviewed} questions reviewed
+                  </span>
+                </div>
+                {application.questionReview.status === "unavailable" && (
+                  <p className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-sm text-amber-100">
+                    AI question review is temporarily unavailable. Do not infer answers; review your profile and resume manually.
+                  </p>
+                )}
+                <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                  {[
+                    ["Supported", application.questionReview.supported_count],
+                    ["Partial", application.questionReview.partial_count],
+                    ["Not found", application.questionReview.not_found_count],
+                    ["Manual", application.questionReview.manual_review_count],
+                  ].map(([label, count]) => (
+                    <div key={String(label)} className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                      <div className="text-xs text-slate-400">{label}</div>
+                      <div className="mt-1 text-xl font-semibold tabular-nums">{count}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-5 space-y-3">
+                  {application.questionReview.reviews.map(review => (
+                    <article key={review.field_index} className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <h3 className="min-w-0 flex-1 text-sm font-semibold text-slate-100">{review.question}</h3>
+                        <span className={"rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " + questionStatusStyle(review.evidence_status)}>
+                          {review.evidence_status.replaceAll("_", " ")}
+                        </span>
+                      </div>
+                      {review.reason && <p className="mt-2 text-sm leading-6 text-slate-300">{review.reason}</p>}
+                      {!!review.evidence?.length && (
+                        <div className="mt-3 space-y-2">
+                          {review.evidence.map((source, index) => (
+                            <div key={source.source + source.path + index} className="rounded-lg bg-white/[0.035] p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                {source.source === "verified_profile" ? "Verified career profile" : "Tailored resume"} · {source.path}
+                              </div>
+                              <p className="mt-1 text-xs leading-5 text-slate-300">{source.detail}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {review.suggested_answer && (
+                        <div className="mt-3 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.05] p-3">
+                          <div className="text-xs font-semibold text-emerald-200">Evidence-backed answer draft — review before using</div>
+                          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-200">{review.suggested_answer}</p>
+                        </div>
+                      )}
+                      {review.profile_improvement && (
+                        <div className="mt-3 rounded-lg border border-amber-300/15 bg-amber-300/[0.05] p-3">
+                          <div className="text-xs font-semibold text-amber-200">Possible profile improvement</div>
+                          <p className="mt-1 text-sm leading-6 text-slate-300">{review.profile_improvement}</p>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+                {!!application.questionReview.profile_improvements?.length && (
+                  <div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-semibold text-amber-100">Improve your career profile</h3>
+                      <a href="/profile" className="text-xs font-semibold text-cyan-300 underline">Open career profile ↗</a>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">Only add details that are accurate and that you can support in an interview.</p>
+                    <ul className="mt-3 space-y-3">
+                      {application.questionReview.profile_improvements.map((item, index) => (
+                        <li key={item.field_index + "-" + index} className="text-sm leading-6 text-slate-200">
+                          <span className="mr-2 rounded border border-amber-300/20 px-1.5 py-0.5 text-[10px] uppercase text-amber-200">{item.priority}</span>
+                          <span className="font-medium">{item.question}</span>
+                          <p className="mt-1 text-slate-300">{item.recommendation}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <p className="mt-4 text-xs leading-5 text-slate-500">
+                  JobPilot never checks consent boxes or answers demographic, eligibility, prior-employment or other sensitive declarations. These remain your decision.
+                </p>
+              </section>
+            )}
             {application.status === "READY_FOR_REVIEW" && (
               <section className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.04] p-6">
                 <h2 className="text-lg font-semibold">Final human approval</h2>

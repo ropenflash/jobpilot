@@ -134,6 +134,7 @@ public class ApplicationController {
         workerRequest.put("career_profile", profile.getExtracted());
         workerRequest.put("tailored_resume_base64", Base64.getEncoder().encodeToString(resumeBytes));
         workerRequest.put("tailored_resume_filename", "tailored-resume." + format);
+        workerRequest.put("tailored_resume", tailored.getResume() == null ? Map.of() : tailored.getResume());
 
         try {
             Map<String, Object> workerResult = workerClient.post()
@@ -291,6 +292,7 @@ public class ApplicationController {
         record.setMessage((String) result.get("message"));
         record.setAutomationNotes(toStringList(result.get("automation_notes")));
         record.setFormVerification(toMap(result.get("form_verification")));
+        record.setQuestionReview(toMap(result.get("question_review")));
         record.setFields(toMapList(result.get("fields")));
         record.setMissingRequiredFields(toStringList(result.get("missing_required_fields")));
         record.setUpdatedAt(Instant.now());
@@ -365,6 +367,8 @@ public class ApplicationController {
             record.getAutomationNotes() == null ? List.of() : record.getAutomationNotes());
         response.put("formVerification",
             record.getFormVerification() == null ? Map.of() : record.getFormVerification());
+        response.put("questionReview",
+            record.getQuestionReview() == null ? Map.of() : record.getQuestionReview());
         response.put("createdAt", record.getCreatedAt());
         response.put("updatedAt", record.getUpdatedAt());
         response.put("approvedAt", record.getApprovedAt());
