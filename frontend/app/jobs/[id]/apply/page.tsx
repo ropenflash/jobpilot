@@ -31,6 +31,7 @@ type Application = {
   fields: ApplicationField[];
   missingRequiredFields: string[];
   message: string | null;
+  automationNotes?: string[];
   createdAt: string;
   updatedAt: string;
   submittedAt?: string | null;
@@ -279,6 +280,14 @@ export default function ApplyPage() {
                 )}
               </div>
               <p className="mt-4 text-sm leading-6 text-slate-300">{application.message}</p>
+              {!!application.automationNotes?.length && (
+                <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
+                  <h3 className="text-sm font-semibold text-amber-100">Automation notes</h3>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-300">
+                    {application.automationNotes.map((note, index) => <li key={index}>{note}</li>)}
+                  </ul>
+                </div>
+              )}
               <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-4 text-sm leading-6 text-slate-300">
                 <strong className="text-cyan-100">Look for the Chromium window.</strong> It is displayed on the computer running
                 the Python worker. Complete unanswered screening questions, dropdowns, and any manual verification there.
