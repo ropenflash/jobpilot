@@ -9,9 +9,11 @@ from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
 from app.agents.job_analyzer import analyze_and_match
 from app.agents.resume_tailor import tailor_resume
+from app.browser.application_manager import ApplicationAutomationError, application_sessions
 from app.schemas.job import JobAnalysisResponse
 from app.schemas.resume import ResumeProfile
 from app.schemas.tailored_resume import TailoredResumeRequest
+from app.schemas.application import PrepareApplicationRequest, SubmitApplicationRequest
 from app.services.greenhouse import fetch_greenhouse_job
 from app.services.vertex_client import (
     VertexError,
@@ -26,8 +28,8 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 app = FastAPI(
     title="JobPilot Worker",
-    version="0.5.0",
-    description="AI resume extraction, Greenhouse job analysis and resume tailoring worker using Vertex AI."
+    version="0.6.0",
+    description="AI resume intelligence and visible, human-approved Greenhouse application automation."
 )
 
 
@@ -155,3 +157,57 @@ async def tailor_resume_endpoint(request: TailoredResumeRequest):
         match=request.match,
         profile=request.career_profile,
     )
+
+def _application_error(exc: ApplicationAutomationError):
+    return HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/applications/prepare")
+async def prepare_application(request: PrepareApplicationRequest):
+    try:
+        return await application_sessions.prepare(
+            application_id=request.application_id,
+            job_url=str(request.job_url),
+            career_profile=request.career_profile,
+            resume_pdf_base64=request.tailored_resume_pdf_base64,
+        )
+    except ApplicationAutomationError as exc:
+        raise _application_error(exc) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "Executable doesn't exist" in message or ("browser" in message.lower() and "launch" in message.lower()):
+            message = "Chromium is not installed or could not launch. Run playwright install chromium on this computer."
+        raise HTTPException(status_code=502, detail=message) from exc
+
+
+@app.get("/applications/{session_id}")
+async def get_application(session_id: str):
+    try:
+        return await application_sessions.get(session_id)
+    except ApplicationAutomationError as exc:
+        raise _application_error(exc) from exc
+
+
+@app.post("/applications/{session_id}/refresh")
+async def refresh_application(session_id: str):
+    try:
+        return await application_sessions.refresh(session_id)
+    except ApplicationAutomationError as exc:
+        raise _application_error(exc) from exc
+
+
+@app.post("/applications/{session_id}/submit")
+async def submit_application(session_id: str, request: SubmitApplicationRequest):
+    try:
+        return await application_sessions.submit(session_id, request.confirm_submit)
+    except ApplicationAutomationError as exc:
+        raise _application_error(exc) from exc
+
+
+@app.post("/applications/{session_id}/cancel")
+async def cancel_application(session_id: str):
+    try:
+        return await application_sessions.cancel(session_id)
+    except ApplicationAutomationError as exc:
+        raise _application_error(exc) from exc
+\n

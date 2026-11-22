@@ -222,6 +222,9 @@ export default function JobsPage() {
                 <a href={"/jobs/" + encodeURIComponent(active.id) + "/tailor"} className="mt-4 ml-4 inline-block text-sm font-semibold text-emerald-300 underline">
                   Tailor resume for this job →
                 </a>
+                <a href={"/jobs/" + encodeURIComponent(active.id) + "/apply"} className="mt-4 ml-4 inline-block text-sm font-semibold text-cyan-200 underline">
+                  Apply with JobPilot →
+                </a>
 
                 <div className="mt-6 border-t border-white/10 pt-5">
                   <div className="text-xs tracking-wider text-slate-400">PROFILE MATCH ESTIMATE</div>
