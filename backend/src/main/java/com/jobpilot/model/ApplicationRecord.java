@@ -20,6 +20,7 @@ public class ApplicationRecord {
     private List<Map<String, Object>> fields;
     private List<String> missingRequiredFields;
     private String message;
+    private List<String> automationNotes;
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
     private Instant approvedAt;
@@ -47,6 +48,8 @@ public class ApplicationRecord {
     public void setMissingRequiredFields(List<String> missingRequiredFields) { this.missingRequiredFields = missingRequiredFields; }
     public String getMessage() { return message; }
     public void setMessage(String message) { this.message = message; }
+    public List<String> getAutomationNotes() { return automationNotes; }
+    public void setAutomationNotes(List<String> automationNotes) { this.automationNotes = automationNotes; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
