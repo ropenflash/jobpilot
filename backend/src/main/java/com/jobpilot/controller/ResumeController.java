@@ -9,8 +9,12 @@ import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -219,7 +223,31 @@ public class ResumeController {
         }
 
         profile.setResumeId(id);
-        profile.setExtracted(extracted);
+
+        // Preserve candidate-maintained application data when a new master resume is uploaded.
+        Map<String, Object> mergedExtracted = new LinkedHashMap<>(extracted);
+        if (profile.getExtracted() != null) {
+            for (String key : List.of(
+                    "application_answers", "city", "location_city", "linkedin_url", "linkedin",
+                    "github_url", "github", "website", "portfolio_url",
+                    "java_experience_years", "spring_boot_experience_years",
+                    "microservices_experience_years", "kafka_experience_years", "gcp_experience_years",
+                    "official_notice_period", "currently_serving_notice",
+                    "official_last_working_day", "join_availability",
+                    "current_ctc_lpa", "expected_ctc_lpa", "ctc_currency")) {
+                Object existingValue = profile.getExtracted().get(key);
+                Object newValue = mergedExtracted.get(key);
+                boolean newValueIsBlank = newValue == null
+                    || (newValue instanceof String text && text.isBlank())
+                    || (newValue instanceof List<?> list && list.isEmpty());
+                boolean isReusableAnswerHistory = "application_answers".equals(key);
+                if (existingValue != null && (newValueIsBlank || isReusableAnswerHistory)) {
+                    mergedExtracted.put(key, existingValue);
+                }
+            }
+        }
+
+        profile.setExtracted(mergedExtracted);
         profile.setVerified(false);
         profile.setUpdatedAt(Instant.now());
 
@@ -231,7 +259,7 @@ public class ResumeController {
         return Map.of(
             "resumeId", id,
             "fileName", original,
-            "profile", extracted,
+            "profile", mergedExtracted,
             "verified", false
         );
     }
@@ -259,6 +287,122 @@ public class ResumeController {
                     : profile.getExtracted(),
             "updatedAt", profile.getUpdatedAt().toString()
         );
+    }
+
+    @PutMapping("/profile/application-answers")
+    public Map<String, Object> saveApplicationAnswer(
+            @RequestBody Map<String, Object> request) {
+
+        CareerProfile profile = mongo.findById("default", CareerProfile.class);
+        if (profile == null || profile.getExtracted() == null) {
+            throw new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "Upload and verify a career profile before saving reusable application answers."
+            );
+        }
+
+        String question = request.get("question") == null ? "" : request.get("question").toString().trim();
+        String answer = request.get("answer") == null ? "" : request.get("answer").toString().trim();
+        String requestedClassification = request.get("classification") == null
+            ? "manual"
+            : request.get("classification").toString().trim().toLowerCase(Locale.ROOT);
+
+        if (question.isBlank() || question.length() > 500) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter the application question (maximum 500 characters).");
+        }
+        if (answer.isBlank() || answer.length() > 5000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter an answer (maximum 5,000 characters).");
+        }
+
+        if (isSensitiveApplicationQuestion(question, requestedClassification)) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Consent, eligibility, demographic and other sensitive declarations cannot be stored for automatic reuse."
+            );
+        }
+
+        Set<String> reusableClassifications = Set.of(
+            "phone", "city", "years_java", "years_spring_boot_microservices",
+            "years_spring_boot", "years_microservices", "years_kafka", "years_gcp",
+            "notice_period", "last_working_day", "join_availability",
+            "current_ctc", "expected_ctc", "manual"
+        );
+        String classification = reusableClassifications.contains(requestedClassification)
+            ? requestedClassification
+            : "manual";
+        String normalizedQuestion = normalizeApplicationQuestion(question);
+
+        Map<String, Object> extracted = new LinkedHashMap<>(profile.getExtracted());
+        List<Map<String, Object>> answers = new ArrayList<>();
+        Object existing = extracted.get("application_answers");
+        if (existing instanceof List<?> existingList) {
+            for (Object item : existingList) {
+                if (item instanceof Map<?, ?> map) {
+                    Map<String, Object> saved = new LinkedHashMap<>();
+                    map.forEach((key, value) -> saved.put(String.valueOf(key), value));
+                    answers.add(saved);
+                }
+            }
+        }
+
+        answers.removeIf(saved -> {
+            String savedClassification = String.valueOf(saved.getOrDefault("classification", "manual"));
+            String savedQuestion = String.valueOf(saved.getOrDefault("normalized_question", ""));
+            if ("manual".equals(classification)) {
+                return "manual".equals(savedClassification) && normalizedQuestion.equals(savedQuestion);
+            }
+            return classification.equals(savedClassification);
+        });
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("id", UUID.randomUUID().toString());
+        entry.put("question", question);
+        entry.put("normalized_question", normalizedQuestion);
+        entry.put("answer", answer);
+        entry.put("classification", classification);
+        entry.put("candidate_confirmed", true);
+        entry.put("updated_at", Instant.now().toString());
+        answers.add(entry);
+        if (answers.size() > 100) {
+            answers = new ArrayList<>(answers.subList(answers.size() - 100, answers.size()));
+        }
+
+        extracted.put("application_answers", answers);
+        profile.setExtracted(extracted);
+        profile.setVerified(true);
+        profile.setUpdatedAt(Instant.now());
+        mongo.save(profile);
+
+        return Map.of(
+            "configured", true,
+            "verified", true,
+            "saved", true,
+            "applicationAnswer", entry,
+            "profile", extracted
+        );
+    }
+
+    private String normalizeApplicationQuestion(String question) {
+        return question.toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9]+", " ")
+            .trim()
+            .replaceAll("\\s+", " ");
+    }
+
+    private boolean isSensitiveApplicationQuestion(String question, String classification) {
+        if (Set.of("sensitive_or_eligibility", "checkbox_review", "sensitive_or_candidate_decision")
+                .contains(classification)) {
+            return true;
+        }
+        String text = question.toLowerCase(Locale.ROOT);
+        return List.of(
+            "privacy notice", "consent", "i agree", "race", "ethnicity", "gender",
+            "disability", "veteran", "citizenship", "work authorization",
+            "work authorisation", "authorized to work", "authorised to work",
+            "sponsorship", "visa status", "right to work", "previously employed",
+            "prior employment", "criminal history", "background check",
+            "sexual orientation", "gender identity", "self identify"
+        ).stream().anyMatch(text::contains);
     }
 
     @PutMapping("/profile")

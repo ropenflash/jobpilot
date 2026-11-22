@@ -182,7 +182,9 @@ public class ApplicationController {
     }
 
     @PostMapping("/applications/{id}/refresh")
-    public Map<String, Object> refresh(@PathVariable String id) {
+    public Map<String, Object> refresh(
+            @PathVariable String id,
+            @RequestBody(required = false) Map<String, Object> request) {
         ApplicationRecord record = findOrThrow(id);
 
         CareerProfile profile = mongo.findById("default", CareerProfile.class);
@@ -199,6 +201,15 @@ public class ApplicationController {
         refreshRequest.put("career_profile", profile.getExtracted());
         refreshRequest.put("tailored_resume",
             tailored == null || tailored.getResume() == null ? Map.of() : tailored.getResume());
+
+        if (request != null && request.get("manualAnswer") instanceof Map<?, ?> supplied) {
+            Map<String, Object> manualAnswer = new LinkedHashMap<>();
+            manualAnswer.put("field_index",
+                supplied.containsKey("fieldIndex") ? supplied.get("fieldIndex") : supplied.get("field_index"));
+            manualAnswer.put("question", supplied.get("question"));
+            manualAnswer.put("answer", supplied.get("answer"));
+            refreshRequest.put("manual_answer", manualAnswer);
+        }
 
         Map<String, Object> result = callWorker(
             "/applications/" + record.getBrowserSessionId() + "/refresh",

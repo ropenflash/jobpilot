@@ -3,7 +3,10 @@ import re
 from typing import Any
 
 from app.services.vertex_client import VertexError, generate_text
-from app.agents.application_answer_resolver import resolve_structured_question
+from app.agents.application_answer_resolver import (
+    resolve_saved_application_answer,
+    resolve_structured_question,
+)
 
 
 MAX_QUESTIONS = 25
@@ -24,7 +27,7 @@ PRIVATE_PROFILE_KEYS = {
     "official_notice_period", "notice_period", "notice_period_days",
     "currently_serving_notice", "serving_notice",
     "official_last_working_day", "last_working_day", "join_availability", "availability_to_join",
-    "current_ctc_lpa", "expected_ctc_lpa", "ctc_currency",
+    "current_ctc_lpa", "expected_ctc_lpa", "ctc_currency", "application_answers",
 }
 
 
@@ -108,6 +111,7 @@ def build_questions(fields: list[dict]) -> list[dict]:
             "question": label[:300],
             "control_type": control_type or "unknown",
             "required": bool(field.get("required")),
+            "filled": bool(field.get("filled")),
             "classification": _clean(field.get("classification")) or "manual",
             "options": normalized_options,
         })
@@ -120,6 +124,7 @@ def _manual_review(question: dict, reason: str) -> dict:
     return {
         "field_index": question["field_index"],
         "question": question["question"],
+        "filled": bool(question.get("filled", False)),
         "category": "sensitive_or_candidate_decision",
         "evidence_status": "manual_review",
         "reason": reason,
@@ -179,6 +184,7 @@ def normalize_review(
             reviews.append({
                 "field_index": question["field_index"],
                 "question": question["question"],
+                "filled": bool(question.get("filled", False)),
                 "category": "unknown",
                 "evidence_status": "not_reviewed",
                 "reason": "The AI reviewer did not return a validated assessment for this field.",
@@ -238,6 +244,7 @@ def normalize_review(
         reviews.append({
             "field_index": question["field_index"],
             "question": question["question"],
+            "filled": bool(question.get("filled", False)),
             "category": _clean(item.get("category")) or "experience_or_qualification",
             "evidence_status": status,
             "reason": _clean(item.get("reason"))[:500],
@@ -247,6 +254,7 @@ def normalize_review(
             "needs_profile_update": needs_profile_update,
             "profile_fields_needed": ["experience_or_projects"] if needs_profile_update else [],
             "answer_basis": "verified profile/resume evidence" if status == "supported" else None,
+            "saved_profile_answer": False,
         })
 
         if profile_improvement:
@@ -301,6 +309,11 @@ async def review_application_questions(
     structured = {}
     for question in questions:
         resolved = resolve_structured_question(question, career_profile, evidence)
+        saved_answer = resolve_saved_application_answer(question, career_profile)
+        if saved_answer is not None and (
+            resolved is None or resolved.get("evidence_status") != "supported"
+        ):
+            resolved = saved_answer
         if resolved is not None:
             structured[question["field_index"]] = resolved
         elif question["classification"] == "unlabelled_field":
@@ -351,6 +364,7 @@ async def review_application_questions(
             base["reviews"].append({
                 "field_index": question["field_index"],
                 "question": question["question"],
+                "filled": bool(question.get("filled", False)),
                 "category": "unknown",
                 "evidence_status": "not_found",
                 "reason": "No usable resume/profile evidence was available to support an answer.",
@@ -419,6 +433,7 @@ async def review_application_questions(
                 by_index[question["field_index"]] = {
                     "field_index": question["field_index"],
                     "question": question["question"],
+                    "filled": bool(question.get("filled", False)),
                     "category": "unknown",
                     "evidence_status": "not_reviewed",
                     "reason": "No validated assessment was returned. Please review this field manually.",
@@ -461,6 +476,7 @@ async def review_application_questions(
             by_index[question["field_index"]] = sensitive_match or {
                 "field_index": question["field_index"],
                 "question": question["question"],
+                "filled": bool(question.get("filled", False)),
                 "category": "unknown",
                 "evidence_status": "not_reviewed",
                 "reason": "AI question review is unavailable. Do not infer an answer; check your profile and resume manually.",

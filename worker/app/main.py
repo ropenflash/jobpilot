@@ -205,6 +205,7 @@ async def refresh_application(
             session_id,
             career_profile=request.career_profile if request else None,
             tailored_resume=request.tailored_resume if request else None,
+            manual_answer=request.manual_answer if request else None,
         )
     except ApplicationAutomationError as exc:
         raise _application_error(exc) from exc

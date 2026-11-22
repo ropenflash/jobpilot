@@ -15,6 +15,7 @@ from app.agents.application_question_reviewer import build_evidence, review_appl
 from app.agents.application_answer_resolver import (
     _direct_technology_years,
     _inferred_technology_years,
+    resolve_saved_application_answer,
 )
 
 
@@ -209,6 +210,7 @@ class BrowserSession:
     tailored_resume: dict = field(default_factory=dict)
     form_verification: dict = field(default_factory=dict)
     question_review: dict = field(default_factory=dict)
+    manual_field_labels: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_activity: float = field(default_factory=time.monotonic)
     status: str = "BROWSER_OPEN"
@@ -333,6 +335,7 @@ class ApplicationSessionManager:
         session_id: str,
         career_profile: dict | None = None,
         tailored_resume: dict | None = None,
+        manual_answer: dict | None = None,
     ) -> dict:
         session = self._get_session(session_id)
         async with session.lock:
@@ -353,6 +356,8 @@ class ApplicationSessionManager:
                 session.status = "NEEDS_USER_INPUT"
                 session.message = "The application form is not currently available in the browser. Finish any page prompt and refresh again."
                 return self._serialize(session)
+            if manual_answer:
+                await self._apply_candidate_answer(session, manual_answer)
             await self._run_agentic_form_completion(session)
             session.missing_required_fields = self._missing_required(session.fields)
             if challenge:
@@ -462,6 +467,77 @@ class ApplicationSessionManager:
                         return
             except Exception:
                 continue
+
+    def _apply_manual_field_labels(self, session: BrowserSession):
+        manual_field_labels = getattr(session, "manual_field_labels", {})
+        for item in session.fields:
+            custom_label = manual_field_labels.get(int(item.get("index", -1)))
+            if custom_label:
+                item["label"] = custom_label
+                item["classification"] = _classify_field(custom_label, item.get("name", ""), item.get("type", ""))
+
+    async def _apply_candidate_answer(self, session: BrowserSession, manual_answer: dict):
+        """Fill one field with the exact answer the candidate just supplied in the JobPilot UI."""
+        try:
+            field_index = int(manual_answer.get("field_index"))
+        except (TypeError, ValueError):
+            return
+
+        question = str(manual_answer.get("question") or "").strip()
+        answer = str(manual_answer.get("answer") or "").strip()
+        if not question or not answer or len(question) > 500 or len(answer) > 5000:
+            return
+
+        session.fields = await self._snapshot_fields(session.frame)
+        field = next((item for item in session.fields if int(item.get("index", -1)) == field_index), None)
+        if field is None:
+            self._add_note(session, "The saved answer could not be attached to the live form because its field is no longer present. Enter it manually in Chromium.")
+            return
+
+        input_type = str(field.get("type") or "").lower()
+        session.manual_field_labels[field_index] = question
+        if input_type in {"checkbox", "radio", "file", "button", "hidden"}:
+            session.fields = await self._snapshot_fields(session.frame)
+            self._apply_manual_field_labels(session)
+            self._add_note(session, "This answer was saved to your profile, but this control still requires manual interaction in Chromium.")
+            return
+
+        control = session.frame.locator(FIELD_SELECTOR).nth(field_index)
+        try:
+            if input_type == "select":
+                options = await control.locator("option").evaluate_all(
+                    "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
+                )
+                normalized_answer = re.sub(r"[^a-z0-9]", "", answer.lower())
+                matches = [
+                    option for option in options
+                    if option.get("value") and normalized_answer
+                    and normalized_answer in {
+                        re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
+                        re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
+                    }
+                ]
+                if len(matches) != 1:
+                    self._add_note(session, "The answer is saved to your profile, but the current dropdown has no exact matching option. Please choose it manually in Chromium.")
+                    return
+                await control.select_option(value=matches[0]["value"])
+            elif input_type in {"text", "email", "tel", "url", "textarea", "number", "date"}:
+                if input_type == "number":
+                    numeric = re.search(r"\d+(?:\.\d+)?", answer.replace(",", ""))
+                    if not numeric:
+                        self._add_note(session, "This numeric field needs a plain numeric answer. The saved profile answer was retained for future reference.")
+                        return
+                    answer = numeric.group(0)
+                await control.fill(answer)
+            else:
+                self._add_note(session, "The answer is saved to your profile, but this control type needs manual entry in Chromium.")
+                return
+            session.manual_field_labels[field_index] = question
+            session.fields = await self._snapshot_fields(session.frame)
+            self._apply_manual_field_labels(session)
+            self._add_note(session, f"Applied your saved answer to the current form field: {question}")
+        except Exception:
+            self._add_note(session, "The answer is saved to your profile, but JobPilot could not apply it to the current field. Please enter it manually in Chromium.")
 
     async def _snapshot_fields(self, frame) -> list[dict]:
         rows = await frame.locator(FIELD_SELECTOR).evaluate_all("""elements => elements.map((el, index) => {
@@ -680,7 +756,52 @@ class ApplicationSessionManager:
                 "file", "checkbox", "radio", "button", "div", "span", "hidden"
             }:
                 continue
-            if classification in {"manual", "sensitive_or_eligibility", "phone_country_code"}:
+            if classification in {"sensitive_or_eligibility", "checkbox_review", "phone_country_code", "unlabelled_field"}:
+                continue
+
+            saved_answer = resolve_saved_application_answer(
+                {
+                    "field_index": item["index"],
+                    "question": item.get("label", ""),
+                    "classification": classification,
+                    "filled": item.get("filled", False),
+                },
+                career_profile,
+            )
+            saved_answer_text = str(saved_answer.get("suggested_answer") or "") if saved_answer else ""
+            if classification == "manual":
+                if saved_answer_text and input_type in {"text", "email", "tel", "url", "textarea", "number", "date"}:
+                    try:
+                        reusable_value = saved_answer_text
+                        if input_type == "number":
+                            saved_number = re.search(r"\d+(?:\.\d+)?", saved_answer_text.replace(",", ""))
+                            reusable_value = saved_number.group(0) if saved_number else ""
+                        if not reusable_value:
+                            continue
+                        await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).fill(reusable_value)
+                        filled_count += 1
+                        self._add_note(session, f"Reused a previous user-confirmed answer for: {item.get('label', 'application question')}")
+                    except Exception:
+                        pass
+                elif saved_answer_text and input_type == "select":
+                    try:
+                        manual_options = await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).locator("option").evaluate_all(
+                            "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
+                        )
+                        normalized_saved = re.sub(r"[^a-z0-9]", "", saved_answer_text.lower())
+                        manual_matches = [
+                            option for option in manual_options
+                            if option.get("value") and normalized_saved
+                            and normalized_saved in {
+                                re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
+                                re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
+                            }
+                        ]
+                        if len(manual_matches) == 1:
+                            await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).select_option(value=manual_matches[0]["value"])
+                            filled_count += 1
+                    except Exception:
+                        pass
                 continue
 
             control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
@@ -723,11 +844,24 @@ class ApplicationSessionManager:
                             years_number = float(years) if years not in (None, "") else None
                         except (TypeError, ValueError):
                             years_number = None
-                        if years_number is None:
-                            continue
-                        match = _match_experience_range_option(options, years_number)
+                        if years_number is None and saved_answer_text:
+                            saved_number_match = re.search(r"(\d+(?:\.\d+)?)", saved_answer_text.replace(",", ""))
+                            years_number = float(saved_number_match.group(1)) if saved_number_match else None
+                        match = _match_experience_range_option(options, years_number) if years_number is not None else None
                         matches = [match] if match else []
 
+                    if not matches and saved_answer_text:
+                        normalized_answer = re.sub(r"[^a-z0-9]", "", saved_answer_text.lower())
+                        exact_saved_matches = [
+                            option for option in options
+                            if option.get("value") and normalized_answer
+                            and normalized_answer in {
+                                re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
+                                re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
+                            }
+                        ]
+                        if len(exact_saved_matches) == 1:
+                            matches = exact_saved_matches
                     if len(matches) == 1:
                         await control.select_option(value=matches[0]["value"])
                         filled_count += 1
@@ -767,6 +901,12 @@ class ApplicationSessionManager:
                 else:
                     value = values.get(classification, "")
 
+                if not value and saved_answer_text:
+                    value = saved_answer_text
+                    self._add_note(session, f"Reused a previous user-confirmed answer for: {item.get('label', 'application question')}")
+                if value and input_type == "number":
+                    numeric_value = re.search(r"\d+(?:\.\d+)?", str(value).replace(",", ""))
+                    value = numeric_value.group(0) if numeric_value else ""
                 if not value:
                     continue
                 if input_type not in {"text", "email", "tel", "url", "textarea", "number", "date"}:
@@ -801,9 +941,11 @@ class ApplicationSessionManager:
                 session.frame = current_frame
 
             session.fields = await self._snapshot_fields(session.frame)
+            self._apply_manual_field_labels(session)
             safe_fills = await self._autofill(session, session.career_profile)
             await session.page.wait_for_timeout(250)
             session.fields = await self._snapshot_fields(session.frame)
+            self._apply_manual_field_labels(session)
             session.missing_required_fields = self._missing_required(session.fields)
 
             pass_results.append({

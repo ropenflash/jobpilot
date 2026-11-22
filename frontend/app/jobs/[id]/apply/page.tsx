@@ -56,6 +56,8 @@ type QuestionReviewItem = {
   needs_profile_update?: boolean;
   profile_fields_needed?: string[];
   answer_basis?: string | null;
+  saved_profile_answer?: boolean;
+  filled?: boolean;
 };
 
 type QuestionReview = {
@@ -151,6 +153,9 @@ export default function ApplyPage() {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [answerDrafts, setAnswerDrafts] = useState<Record<number, string>>({});
+  const [questionLabelDrafts, setQuestionLabelDrafts] = useState<Record<number, string>>({});
+  const [savingAnswerFor, setSavingAnswerFor] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -223,6 +228,71 @@ export default function ApplyPage() {
     }
   }
 
+  async function saveAnswerForFuture(review: QuestionReviewItem) {
+    if (!application) return;
+    const question = review.category === "unlabelled_field"
+      ? (questionLabelDrafts[review.field_index] ?? "").trim()
+      : review.question.trim();
+    const answer = (answerDrafts[review.field_index] ?? "").trim();
+
+    if (!question) {
+      setError("Describe what the unlabelled field is asking before saving an answer.");
+      return;
+    }
+    if (!answer) {
+      setError("Enter an answer before saving it to your profile.");
+      return;
+    }
+
+    setSavingAnswerFor(review.field_index);
+    setWorking(true);
+    setError("");
+    setNotice("");
+    try {
+      const saveResponse = await fetch(API + "/api/profile/application-answers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          answer,
+          classification: review.category,
+        }),
+      });
+      const savedData = await saveResponse.json();
+      if (!saveResponse.ok) throw new Error(responseMessage(savedData, "Could not save this answer to your career profile."));
+
+      // Refresh sends the latest verified profile back to the open browser session.
+      // The field index is used only for this current form; future forms use the saved question match.
+      const refreshResponse = await fetch(API + "/api/applications/" + encodeURIComponent(application.id) + "/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          manualAnswer: {
+            fieldIndex: review.field_index,
+            question,
+            answer,
+          },
+        }),
+      });
+      const refreshedData = await refreshResponse.json();
+      if (!refreshResponse.ok) {
+        setNotice("Your answer was saved to your career profile. Refresh the form manually to apply it to this open application.");
+        throw new Error(responseMessage(refreshedData, "The answer was saved, but the current form could not be refreshed."));
+      }
+
+      setApplication(refreshedData as Application);
+      setConfirmReviewed(false);
+      setAnswerDrafts(current => ({ ...current, [review.field_index]: "" }));
+      setQuestionLabelDrafts(current => ({ ...current, [review.field_index]: "" }));
+      setNotice("Answer saved in your career profile and applied to the current form where the control supports it. JobPilot can reuse it for matching questions in future applications.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this application answer.");
+    } finally {
+      setSavingAnswerFor(null);
+      setWorking(false);
+    }
+  }
+
   async function submitApplication() {
     if (!application || !confirmReviewed || application.status !== "READY_FOR_REVIEW") return;
     const confirmed = window.confirm(
@@ -287,9 +357,9 @@ export default function ApplyPage() {
           <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Review and apply</h1>
           {job && <p className="mt-3 text-slate-400">{job.job.title} · {job.job.company}{job.job.location ? " · " + job.job.location : ""}</p>}
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-            JobPilot opens a visible Chromium window, fills only clearly identified contact fields from your verified profile,
-            and uploads the selected tailored PDF or Word document. Complete screening questions yourself in the browser.
-            Nothing is submitted until you review the form and explicitly confirm here.
+            JobPilot opens a visible Chromium window, fills fields supported by your verified profile and previously saved answers,
+            and uploads the selected tailored PDF or Word document. When a question is new or missing an answer, you can add it
+            to your profile from the review panel. Nothing is submitted until you review the form and explicitly confirm here.
           </p>
         </header>
 
@@ -510,7 +580,7 @@ export default function ApplyPage() {
                   <div>
                     <h2 className="text-lg font-semibold">Question-to-profile match</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-400">
-                      JobPilot compares application questions with your verified profile and tailored resume, resolves structured facts where possible, and identifies missing details. Suggested answers are drafts only; they are never entered automatically.
+                      JobPilot compares questions with your verified profile and tailored resume. AI-generated drafts stay review-only; answers you explicitly save in your profile can be reused for matching questions on future applications.
                     </p>
                   </div>
                   <span className="rounded-full border border-violet-300/30 bg-violet-300/10 px-3 py-1 text-xs font-medium text-violet-200">
@@ -546,12 +616,21 @@ export default function ApplyPage() {
                         </span>
                       </div>
                       {review.reason && <p className="mt-2 text-sm leading-6 text-slate-300">{review.reason}</p>}
+                      {review.saved_profile_answer && (
+                        <p className="mt-2 text-xs font-medium text-emerald-200">
+                          Reused an answer you previously saved in your career profile.
+                        </p>
+                      )}
                       {!!review.evidence?.length && (
                         <div className="mt-3 space-y-2">
                           {review.evidence.map((source, index) => (
                             <div key={source.source + source.path + index} className="rounded-lg bg-white/[0.035] p-3">
                               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                {source.source === "verified_profile" ? "Verified career profile" : "Tailored resume"} · {source.path}
+                                {source.source === "verified_profile"
+                                  ? "Verified career profile"
+                                  : source.source === "saved_application_answer"
+                                    ? "Previously saved application answer"
+                                    : "Tailored resume"} · {source.path}
                               </div>
                               <p className="mt-1 text-xs leading-5 text-slate-300">{source.detail}</p>
                             </div>
@@ -581,6 +660,50 @@ export default function ApplyPage() {
                           <p className="mt-1 text-sm leading-6 text-slate-300">{review.profile_improvement}</p>
                         </div>
                       )}
+                      {!review.filled
+                        && !["sensitive_or_eligibility", "checkbox_review", "sensitive_or_candidate_decision"].includes(review.category)
+                        && (review.evidence_status !== "supported" || !review.suggested_answer)
+                        && (
+                          <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.045] p-4">
+                            <div className="text-sm font-semibold text-cyan-100">
+                              {review.category === "unlabelled_field"
+                                ? "Tell JobPilot what this field is asking"
+                                : "Add an answer to your reusable profile"}
+                            </div>
+                            <p className="mt-1 text-xs leading-5 text-slate-400">
+                              Your answer will be saved as extra career-profile information and can be reused when a future job application asks the same or a matching question.
+                            </p>
+                            {review.category === "unlabelled_field" && (
+                              <label className="mt-3 block text-xs text-slate-300">
+                                What is the question or field asking?
+                                <input
+                                  value={questionLabelDrafts[review.field_index] ?? ""}
+                                  onChange={event => setQuestionLabelDrafts(current => ({ ...current, [review.field_index]: event.target.value }))}
+                                  placeholder="Describe the field in your own words"
+                                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-300"
+                                />
+                              </label>
+                            )}
+                            <label className="mt-3 block text-xs text-slate-300">
+                              Your answer
+                              <textarea
+                                rows={3}
+                                value={answerDrafts[review.field_index] ?? ""}
+                                onChange={event => setAnswerDrafts(current => ({ ...current, [review.field_index]: event.target.value }))}
+                                placeholder="Enter an accurate answer you would use for this question"
+                                className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-300"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => void saveAnswerForFuture(review)}
+                              disabled={working || savingAnswerFor !== null}
+                              className="mt-3 rounded-lg bg-cyan-300 px-4 py-2 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {savingAnswerFor === review.field_index ? "Saving and refreshing..." : "Save to profile for future applications"}
+                            </button>
+                          </div>
+                        )}
                     </article>
                   ))}
                 </div>

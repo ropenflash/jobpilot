@@ -1,4 +1,5 @@
 import re
+from difflib import SequenceMatcher
 from datetime import date, datetime
 from typing import Any
 
@@ -205,6 +206,7 @@ def _make_result(
     return {
         "field_index": question["field_index"],
         "question": question["question"],
+        "filled": bool(question.get("filled", False)),
         "category": question["classification"],
         "evidence_status": status,
         "reason": reason,
@@ -470,6 +472,90 @@ def _resolve_profile_question(question: dict, profile: dict, evidence: list[dict
         )
 
     return None
+
+
+
+
+REUSABLE_ANSWER_CLASSIFICATIONS = {
+    "phone", "city", "years_java", "years_spring_boot_microservices",
+    "years_spring_boot", "years_microservices", "years_kafka", "years_gcp",
+    "notice_period", "last_working_day", "join_availability",
+    "current_ctc", "expected_ctc", "manual",
+}
+BLOCKED_REUSE_CLASSIFICATIONS = {
+    "sensitive_or_eligibility", "checkbox_review", "unlabelled_field",
+    "sensitive_or_candidate_decision",
+}
+
+
+def normalize_application_question(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", _clean(value).lower())).strip()
+
+
+def resolve_saved_application_answer(question: dict, profile: dict) -> dict | None:
+    """Reuse only candidate-confirmed answers for the same classified or near-identical question."""
+    classification = _clean(question.get("classification")).lower() or "manual"
+    if classification in BLOCKED_REUSE_CLASSIFICATIONS or classification not in REUSABLE_ANSWER_CLASSIFICATIONS:
+        return None
+
+    current_question = _clean(question.get("question"))
+    normalized = normalize_application_question(current_question)
+    if not normalized or normalized == "unlabelled field":
+        return None
+
+    candidates = []
+    for entry in profile.get("application_answers") or []:
+        if not isinstance(entry, dict) or entry.get("candidate_confirmed") is not True:
+            continue
+        saved_classification = _clean(entry.get("classification")).lower() or "manual"
+        saved_question = _clean(entry.get("question"))
+        saved_normalized = _clean(entry.get("normalized_question")) or normalize_application_question(saved_question)
+        if not saved_normalized:
+            continue
+
+        exact = normalized == saved_normalized
+        if classification == "manual" or saved_classification == "manual":
+            token_count = len(set(normalized.split()) & set(saved_normalized.split()))
+            similar = (
+                classification == "manual"
+                and saved_classification == "manual"
+                and token_count >= 4
+                and SequenceMatcher(None, normalized, saved_normalized).ratio() >= 0.93
+            )
+            if not exact and not similar:
+                continue
+        elif saved_classification != classification:
+            continue
+
+        answer = _clean(entry.get("answer"))
+        if not answer:
+            continue
+        candidates.append((str(entry.get("updated_at") or ""), entry, answer))
+
+    if not candidates:
+        return None
+
+    _updated, entry, answer = sorted(candidates, key=lambda item: item[0], reverse=True)[0]
+    saved_question = _clean(entry.get("question"))
+    return {
+        "field_index": question.get("field_index", 0),
+        "question": current_question,
+        "category": classification,
+        "evidence_status": "supported",
+        "reason": "Reused a matching answer that you explicitly saved in your career profile.",
+        "evidence": [{
+            "source": "saved_application_answer",
+            "path": saved_question,
+            "detail": answer,
+        }],
+        "suggested_answer": answer,
+        "profile_improvement": None,
+        "needs_profile_update": False,
+        "profile_fields_needed": [],
+        "answer_basis": "previous user-confirmed answer in career profile",
+        "saved_profile_answer": True,
+        "filled": bool(question.get("filled", False)),
+    }
 
 
 def resolve_structured_question(
