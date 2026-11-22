@@ -46,7 +46,8 @@ def _flatten_evidence(value: Any, source: str, path: str, output: list[dict]):
                 return
         return
     text = _clean(value)
-    if len(text) < 2:
+    # Single-digit numeric values are valid evidence, e.g. one year of experience.
+    if len(text) < 2 and not text.isdigit():
         return
     output.append({
         "id": f"{source}:{path or 'root'}",
