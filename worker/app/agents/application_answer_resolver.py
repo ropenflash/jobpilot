@@ -206,6 +206,7 @@ def _make_result(
     return {
         "field_index": question["field_index"],
         "question": question["question"],
+        "filled": bool(question.get("filled", False)),
         "category": question["classification"],
         "evidence_status": status,
         "reason": reason,
@@ -507,23 +508,24 @@ def resolve_saved_application_answer(question: dict, profile: dict) -> dict | No
         if not isinstance(entry, dict) or entry.get("candidate_confirmed") is not True:
             continue
         saved_classification = _clean(entry.get("classification")).lower() or "manual"
-        if saved_classification != classification:
-            continue
-
         saved_question = _clean(entry.get("question"))
         saved_normalized = _clean(entry.get("normalized_question")) or normalize_application_question(saved_question)
         if not saved_normalized:
             continue
 
-        if classification == "manual":
-            exact = normalized == saved_normalized
+        exact = normalized == saved_normalized
+        if classification == "manual" or saved_classification == "manual":
             token_count = len(set(normalized.split()) & set(saved_normalized.split()))
             similar = (
-                token_count >= 4
+                classification == "manual"
+                and saved_classification == "manual"
+                and token_count >= 4
                 and SequenceMatcher(None, normalized, saved_normalized).ratio() >= 0.93
             )
-            if not (exact or similar):
+            if not exact and not similar:
                 continue
+        elif saved_classification != classification:
+            continue
 
         answer = _clean(entry.get("answer"))
         if not answer:
