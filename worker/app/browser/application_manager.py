@@ -767,6 +767,25 @@ class ApplicationSessionManager:
                         self._add_note(session, f"Reused a previous user-confirmed answer for: {item.get('label', 'application question')}")
                     except Exception:
                         pass
+                elif saved_answer_text and input_type == "select":
+                    try:
+                        manual_options = await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).locator("option").evaluate_all(
+                            "elements => elements.map(el => ({value: el.value, text: (el.textContent || '').trim()}))"
+                        )
+                        normalized_saved = re.sub(r"[^a-z0-9]", "", saved_answer_text.lower())
+                        manual_matches = [
+                            option for option in manual_options
+                            if option.get("value") and normalized_saved
+                            and normalized_saved in {
+                                re.sub(r"[^a-z0-9]", "", str(option.get("text") or "").lower()),
+                                re.sub(r"[^a-z0-9]", "", str(option.get("value") or "").lower()),
+                            }
+                        ]
+                        if len(manual_matches) == 1:
+                            await session.frame.locator(FIELD_SELECTOR).nth(item["index"]).select_option(value=manual_matches[0]["value"])
+                            filled_count += 1
+                    except Exception:
+                        pass
                 continue
 
             control = session.frame.locator(FIELD_SELECTOR).nth(item["index"])
@@ -809,9 +828,10 @@ class ApplicationSessionManager:
                             years_number = float(years) if years not in (None, "") else None
                         except (TypeError, ValueError):
                             years_number = None
-                        if years_number is None:
-                            continue
-                        match = _match_experience_range_option(options, years_number)
+                        if years_number is None and saved_answer_text:
+                            saved_number_match = re.search(r"(\d+(?:\.\d+)?)", saved_answer_text.replace(",", ""))
+                            years_number = float(saved_number_match.group(1)) if saved_number_match else None
+                        match = _match_experience_range_option(options, years_number) if years_number is not None else None
                         matches = [match] if match else []
 
                     if not matches and saved_answer_text:
