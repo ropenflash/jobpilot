@@ -27,6 +27,17 @@ class ApplicationAnswerDecisionTests(unittest.TestCase):
         self.assertEqual(decision["answer"], "person@example.com")
         self.assertEqual(decision["evidence"][0]["source"], "verified_profile")
 
+    def test_numeric_substrings_do_not_masquerade_as_matching_experience(self):
+        decision = decide_application_answer(
+            self._field(label="Years of Java experience", classification="years_java"),
+            "5 years",
+            "verified_profile",
+            {"java_experience_years": 5},
+            {"resume": {"java_experience_years": 15}},
+        )
+        self.assertEqual(decision["action"], "manual_review")
+        self.assertTrue(decision["conflicts"])
+
     def test_explicit_profile_resume_conflict_blocks_autofill(self):
         decision = decide_application_answer(
             self._field(),
