@@ -49,3 +49,4 @@ class TailoredResumeRequest(BaseModel):
     requirements: dict
     match: dict = Field(default_factory=dict)
     career_profile: dict
+    style: str = Field(default="classic", pattern="^(classic|modern|compact)$")
