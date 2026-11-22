@@ -13,7 +13,11 @@ from app.browser.application_manager import ApplicationAutomationError, applicat
 from app.schemas.job import JobAnalysisResponse
 from app.schemas.resume import ResumeProfile
 from app.schemas.tailored_resume import TailoredResumeRequest
-from app.schemas.application import PrepareApplicationRequest, SubmitApplicationRequest
+from app.schemas.application import (
+    PrepareApplicationRequest,
+    RefreshApplicationRequest,
+    SubmitApplicationRequest,
+)
 from app.services.greenhouse import fetch_greenhouse_job
 from app.services.vertex_client import (
     VertexError,
@@ -192,9 +196,16 @@ async def get_application(session_id: str):
 
 
 @app.post("/applications/{session_id}/refresh")
-async def refresh_application(session_id: str):
+async def refresh_application(
+    session_id: str,
+    request: RefreshApplicationRequest | None = None,
+):
     try:
-        return await application_sessions.refresh(session_id)
+        return await application_sessions.refresh(
+            session_id,
+            career_profile=request.career_profile if request else None,
+            tailored_resume=request.tailored_resume if request else None,
+        )
     except ApplicationAutomationError as exc:
         raise _application_error(exc) from exc
 
