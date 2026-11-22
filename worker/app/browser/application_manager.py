@@ -986,9 +986,13 @@ class ApplicationSessionManager:
             session.career_profile,
             getattr(session, "tailored_resume", {}),
         )
+        decision_store = getattr(session, "answer_decisions", None)
+        if decision_store is None:
+            decision_store = {}
+            session.answer_decisions = decision_store
         for review in session.question_review.get("reviews", []):
             field_index = int(review.get("field_index", -1))
-            decision = session.answer_decisions.get(field_index)
+            decision = decision_store.get(field_index)
             if review.get("suggested_answer") and (
                 not decision or decision.get("action") == "ask_candidate"
             ):
@@ -1001,7 +1005,7 @@ class ApplicationSessionManager:
                         session.career_profile,
                         session.tailored_resume,
                     )
-                    session.answer_decisions[field_index] = decision
+                    decision_store[field_index] = decision
             if decision is None:
                 status = review.get("evidence_status")
                 action = "manual_review" if status == "manual_review" else "ask_candidate"
