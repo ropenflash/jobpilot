@@ -429,6 +429,15 @@ class ApplicationSessionManager:
                 except Exception:
                     continue
 
+        manual_dropdowns = [
+            item for item in session.fields
+            if item["type"] == "select" and item["classification"] == "manual" and not item["filled"]
+        ]
+        if manual_dropdowns:
+            session.automation_notes.append(
+                "Other job-specific dropdowns were left for manual selection; JobPilot does not guess screening or eligibility answers."
+            )
+
         await self._upload_resume(session)
 
     async def _select_phone_country_code(self, session: BrowserSession, phone: str) -> str | None:
@@ -437,7 +446,7 @@ class ApplicationSessionManager:
 
         controls = [
             item for item in session.fields
-            if item["classification"] == "phone_country_code" and not item["filled"]
+            if item["classification"] == "phone_country_code"
         ]
         if len(controls) != 1:
             return None
