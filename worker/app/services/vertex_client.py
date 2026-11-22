@@ -58,7 +58,12 @@ def _endpoint(model: str) -> str:
     )
 
 
-def _payload(messages: list[dict], *, json_mode: bool) -> dict:
+def _payload(
+    messages: list[dict],
+    *,
+    json_mode: bool,
+    max_output_tokens: int | None = None,
+) -> dict:
     system_parts: list[str] = []
     contents: list[dict] = []
     for message in messages:
@@ -77,7 +82,7 @@ def _payload(messages: list[dict], *, json_mode: bool) -> dict:
 
     generation_config: dict = {
         "temperature": 0.2,
-        "maxOutputTokens": int(os.getenv("VERTEX_MAX_TOKENS", "3000")),
+        "maxOutputTokens": max_output_tokens or int(os.getenv("VERTEX_MAX_TOKENS", "3000")),
         "thinkingConfig": {"thinkingBudget": 0},
     }
     if json_mode:
@@ -93,7 +98,14 @@ def _read_text(body: dict) -> str:
     candidates = body.get("candidates") or []
     if not candidates:
         raise VertexError("Vertex returned an empty response.")
-    parts = ((candidates[0].get("content") or {}).get("parts")) or []
+    candidate = candidates[0]
+    finish_reason = candidate.get("finishReason")
+    if finish_reason == "MAX_TOKENS":
+        raise VertexError(
+            "Vertex output reached its token limit. Increase VERTEX_MAX_TOKENS "
+            "or VERTEX_JOB_MAX_OUTPUT_TOKENS."
+        )
+    parts = ((candidate.get("content") or {}).get("parts")) or []
     texts = [
         part.get("text", "")
         for part in parts
@@ -101,8 +113,7 @@ def _read_text(body: dict) -> str:
     ]
     text = "\n".join(texts).strip()
     if not text:
-        finish = candidates[0].get("finishReason", "no text")
-        raise VertexError(f"Vertex returned an empty response ({finish}).")
+        raise VertexError(f"Vertex returned an empty response ({finish_reason or 'no text'}).")
     return text
 
 
@@ -111,6 +122,7 @@ async def generate_text(
     model: str | None = None,
     *,
     json_mode: bool = False,
+    max_output_tokens: int | None = None,
 ) -> str:
     chosen_model = model or model_name()
     try:
@@ -121,7 +133,11 @@ async def generate_text(
                     "Authorization": f"Bearer {_access_token()}",
                     "Content-Type": "application/json",
                 },
-                json=_payload(messages, json_mode=json_mode),
+                json=_payload(
+                    messages,
+                    json_mode=json_mode,
+                    max_output_tokens=max_output_tokens,
+                ),
             )
             response.raise_for_status()
             return _read_text(response.json())
