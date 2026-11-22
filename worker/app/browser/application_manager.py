@@ -209,6 +209,7 @@ class BrowserSession:
     upload_path: Path
     career_profile: dict = field(default_factory=dict)
     tailored_resume: dict = field(default_factory=dict)
+    job_context: dict = field(default_factory=dict)
     form_verification: dict = field(default_factory=dict)
     question_review: dict = field(default_factory=dict)
     manual_field_labels: dict = field(default_factory=dict)
@@ -233,7 +234,8 @@ class ApplicationSessionManager:
 
     async def prepare(self, application_id: str, job_url: str, career_profile: dict,
                       resume_base64: str, resume_filename: str = "tailored-resume.pdf",
-                      tailored_resume: dict | None = None) -> dict:
+                      tailored_resume: dict | None = None,
+                      job_context: dict | None = None) -> dict:
         _validate_greenhouse_url(job_url)
         await self._expire_stale_sessions()
         extension = Path(resume_filename).suffix.lower()
@@ -287,6 +289,7 @@ class ApplicationSessionManager:
                 upload_path=upload_path,
                 career_profile=career_profile,
                 tailored_resume=tailored_resume or {},
+                job_context=job_context or {},
                 application_url=page.url,
             )
             self.sessions[application_id] = session
@@ -338,6 +341,7 @@ class ApplicationSessionManager:
         career_profile: dict | None = None,
         tailored_resume: dict | None = None,
         manual_answer: dict | None = None,
+        job_context: dict | None = None,
     ) -> dict:
         session = self._get_session(session_id)
         async with session.lock:
@@ -346,6 +350,8 @@ class ApplicationSessionManager:
                 session.career_profile = career_profile
             if tailored_resume is not None:
                 session.tailored_resume = tailored_resume
+            if job_context is not None:
+                session.job_context = job_context
             if session.status in {"SUBMITTED", "SUBMISSION_UNKNOWN", "SUBMITTING"}:
                 return self._serialize(session)
             frame = await self._find_application_frame(session.page)
@@ -982,6 +988,7 @@ class ApplicationSessionManager:
             session.fields,
             session.career_profile,
             getattr(session, "tailored_resume", {}),
+            getattr(session, "job_context", {}),
         )
         decision_store = getattr(session, "answer_decisions", None)
         if decision_store is None:
