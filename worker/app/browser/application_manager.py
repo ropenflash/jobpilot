@@ -591,7 +591,7 @@ class ApplicationSessionManager:
             selection_reason = "found the only PDF-accepting file input"
         elif len(pdf_inputs) > 1:
             session.automation_notes.append(
-                "Resume upload: Multiple PDF file inputs were found without a unique resume label. Attach the tailored PDF manually."
+                "Resume upload: Multiple PDF file inputs were found without a unique resume label. Attach the selected resume manually."
             )
             return
         elif len(discovered) == 1 and discovered[0]["score"] == 0:
@@ -599,7 +599,7 @@ class ApplicationSessionManager:
             selection_reason = "found the only file input on the application page"
         elif not discovered:
             session.automation_notes.append(
-                "Resume upload: No HTML file input was found in any Greenhouse page frame. The upload widget may not have rendered yet; use Refresh form review to retry or attach the PDF manually."
+                "Resume upload: No HTML file input was found in any Greenhouse page frame. The upload widget may not have rendered yet; use Refresh form review to retry or attach the selected resume manually."
             )
             return
         else:
@@ -615,9 +615,28 @@ class ApplicationSessionManager:
             session.automation_notes.append(
                 "Resume upload: File inputs were found but none could be identified safely as the resume field: "
                 + "; ".join(found)
-                + ". Attach the tailored PDF manually."
+                + ". Attach the selected resume manually."
             )
             return
+
+        accept = str(selected["metadata"].get("accept") or "").lower()
+        extension = session.upload_path.suffix.lower()
+        if accept:
+            accepted_types = {part.strip() for part in accept.split(",") if part.strip()}
+            expected_types = (
+                {".pdf", "application/pdf"}
+                if extension == ".pdf"
+                else {".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+            )
+            if not any(
+                accepted in expected_types or accepted == "*/*"
+                for accepted in accepted_types
+            ):
+                session.automation_notes.append(
+                    f"Resume upload: The selected Greenhouse field does not declare support for {extension}. "
+                    "Choose a supported format or attach the resume manually in Chromium."
+                )
+                return
 
         try:
             already_attached = await selected["locator"].evaluate(
@@ -642,7 +661,7 @@ class ApplicationSessionManager:
                 )
             else:
                 session.automation_notes.append(
-                    "Resume upload: The browser accepted the file-selection call but the input still reports no selected file. Attach the PDF manually."
+                    "Resume upload: The browser accepted the file-selection call but the input still reports no selected file. Attach the selected resume manually."
                 )
         except Exception as exc:
             session.automation_notes.append(
