@@ -290,6 +290,7 @@ public class ApplicationController {
         record.setStatus(String.valueOf(result.getOrDefault("status", "FAILED")));
         record.setMessage((String) result.get("message"));
         record.setAutomationNotes(toStringList(result.get("automation_notes")));
+        record.setFormVerification(toMap(result.get("form_verification")));
         record.setFields(toMapList(result.get("fields")));
         record.setMissingRequiredFields(toStringList(result.get("missing_required_fields")));
         record.setUpdatedAt(Instant.now());
@@ -304,6 +305,13 @@ public class ApplicationController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This application does not have an active browser session.");
         }
         return record;
+    }
+
+    private Map<String, Object> toMap(Object value) {
+        if (!(value instanceof Map<?, ?> map)) return Map.of();
+        Map<String, Object> copy = new LinkedHashMap<>();
+        map.forEach((key, val) -> copy.put(String.valueOf(key), val));
+        return copy;
     }
 
     private List<Map<String, Object>> toMapList(Object value) {
@@ -355,6 +363,8 @@ public class ApplicationController {
         response.put("message", record.getMessage());
         response.put("automationNotes",
             record.getAutomationNotes() == null ? List.of() : record.getAutomationNotes());
+        response.put("formVerification",
+            record.getFormVerification() == null ? Map.of() : record.getFormVerification());
         response.put("createdAt", record.getCreatedAt());
         response.put("updatedAt", record.getUpdatedAt());
         response.put("approvedAt", record.getApprovedAt());

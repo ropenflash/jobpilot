@@ -25,6 +25,19 @@ type ApplicationField = {
   id?: string;
 };
 
+type FormVerification = {
+  passes_completed: number;
+  passes_required: number;
+  required_fields_remaining: number;
+  complete: boolean;
+  pass_results?: Array<{
+    pass: number;
+    fields_checked: number;
+    safe_fills: number;
+    required_fields_remaining: number;
+  }>;
+};
+
 type Application = {
   id: string;
   jobId: string;
@@ -38,6 +51,7 @@ type Application = {
   missingRequiredFields: string[];
   message: string | null;
   automationNotes?: string[];
+  formVerification?: FormVerification;
   createdAt: string;
   updatedAt: string;
   submittedAt?: string | null;
@@ -322,6 +336,36 @@ export default function ApplyPage() {
                 )}
               </div>
               <p className="mt-4 text-sm leading-6 text-slate-300">{application.message}</p>
+              {application.formVerification && (
+                <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-semibold text-cyan-100">Agentic form verification</h3>
+                    <span className="text-xs text-slate-300">
+                      {application.formVerification.passes_completed}/{application.formVerification.passes_required} passes
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    {application.formVerification.complete
+                      ? "All required controls were detected as complete after verification."
+                      : application.formVerification.required_fields_remaining + " required field(s) remain after three checks. Complete these in Chromium and refresh again."}
+                  </p>
+                  {!!application.formVerification.pass_results?.length && (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                      {application.formVerification.pass_results.map(result => (
+                        <div key={result.pass} className="rounded-lg border border-white/10 bg-slate-950/40 p-3 text-xs text-slate-300">
+                          <div className="font-semibold">Pass {result.pass}</div>
+                          <div className="mt-1">{result.fields_checked} controls checked</div>
+                          <div>{result.safe_fills} safe fill actions</div>
+                          <div>{result.required_fields_remaining} required remaining</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="mt-3 text-xs leading-5 text-slate-400">
+                    The agent will not guess prior-employment, eligibility, screening, privacy-consent or unidentified answers.
+                  </p>
+                </div>
+              )}
               <p className="mt-1 text-xs text-slate-400">
                 Attached resume format: {(application.resumeFormat ?? "pdf").toUpperCase()}
               </p>
