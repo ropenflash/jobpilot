@@ -407,8 +407,10 @@ async def review_application_questions(
     career_profile: dict,
     tailored_resume: dict | None = None,
     job_context: dict | None = None,
+    source_resume_text: str | None = None,
 ) -> dict:
-    """Retrieve question-specific candidate evidence, then draft only evidence-grounded answers."""
+    """Retrieve question-specific evidence from profile and both resume sources."""
+
     questions = build_questions(fields)
     if not questions:
         return {
@@ -426,8 +428,19 @@ async def review_application_questions(
         }
 
     evidence = build_evidence(career_profile, tailored_resume)
+    original_resume_evidence: list[dict] = []
+    if source_resume_text and source_resume_text.strip():
+        _flatten_evidence(
+            source_resume_text,
+            "original_resume",
+            "pdf_text",
+            original_resume_evidence,
+        )
+    evidence.extend(original_resume_evidence)
+
     # Personal/contact/compensation fields are handled by deterministic resolvers and
-    # are excluded from the generative prompt regardless of which document they came from.
+    # excluded from the generative prompt. Original-PDF evidence is already line-sanitized
+    # before it reaches this function.
     ai_evidence = [item for item in evidence if not _is_private_evidence(item)]
     role_context = build_job_context(job_context)
 
@@ -542,11 +555,12 @@ async def review_application_questions(
         "instructions": [
             "This is a retrieval-augmented answering task. Answer each form question using only the retrieved_evidence attached to that exact question.",
             "The job_context describes the employer and role. It is for understanding what the question is asking and prioritizing relevant evidence; it is NOT evidence that the candidate possesses a skill, qualification or experience.",
-            "Only verified_profile and tailored_resume snippets are candidate evidence. Cite the exact evidence IDs used in evidence_refs.",
+            "Only verified_profile, tailored_resume and sanitized original_resume snippets are candidate evidence. Cite the exact evidence IDs used in evidence_refs.",
             "Read the snippets together. A relevant fact may be described using different words in the resume than in the form question; use the meaning and surrounding work context, not only exact keyword matches.",
             "Synthesize a concise, first-person answer from multiple retrieved snippets when they jointly support it. Do not merely copy an isolated keyword.",
             "Never invent experience, dates, qualifications, metrics, employers, team sizes, technologies, ownership or outcomes. Do not convert a skill mention into years of experience unless the source explicitly states the duration or a trusted deterministic resolver supplied it.",
             "A supported answer must directly answer the question and every material claim must be supported by at least one cited snippet. If evidence is incomplete, use partial and leave suggested_answer null.",
+            "The original_resume source is text extracted from the candidate's uploaded source PDF after removing obvious contact, URL, phone and compensation lines; use it as candidate evidence only for professional facts.",
             "If the retrieved evidence does not support a factual answer, use not_found and leave suggested_answer null. Do not use job_context as a substitute for candidate evidence.",
             "Do not infer consent, privacy acceptance, demographics, disability, race, gender, veteran status, citizenship, work authorization, sponsorship eligibility, criminal history, or prior employment.",
             "Do not guess answers for legal declarations, screening decisions, compensation expectations, visa status or availability.",
@@ -564,7 +578,7 @@ async def review_application_questions(
             "content": (
                 "You are JobPilot's retrieval-augmented application answer engine. "
                 "Retrieve no new facts from the internet or model knowledge. Build answers "
-                "from the question-specific candidate evidence that has already been retrieved. "
+                "from the question-specific candidate evidence that has already been retrieved, including sanitized original-resume text when provided. "
                 "Never fabricate facts or decide sensitive candidate declarations."
             ),
         },
