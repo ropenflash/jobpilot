@@ -591,7 +591,7 @@ class ApplicationSessionManager:
             return
         elif len(pdf_inputs) == 1:
             selected = pdf_inputs[0]
-            selection_reason = "found the only PDF-accepting file input"
+            selection_reason = "found the only PDF/DOCX-accepting file input"
         elif len(pdf_inputs) > 1:
             session.automation_notes.append(
                 "Resume upload: Multiple PDF file inputs were found without a unique resume label. Attach the selected resume manually."
