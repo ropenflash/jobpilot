@@ -53,6 +53,24 @@ class ApplicationAutomationTests(unittest.TestCase):
             "sensitive_or_eligibility",
         )
 
+    def test_application_question_classifier_identifies_structured_profile_fields(self):
+        cases = [
+            ("Phone", "text", "phone"),
+            ("Location (City)", "text", "city"),
+            ("Unlabelled field", "text", "unlabelled_field"),
+            ("How many years of experience you have in Java development?", "text", "years_java"),
+            ("What is your official notice period? If you are serving notice, mention official last working day.", "text", "notice_period"),
+            ("How soon can you join us?", "text", "join_availability"),
+            ("How many years of experience in Springboot, Microservices?", "select", "years_spring_boot_microservices"),
+            ("How many years of experience working with Kafka?", "text", "years_kafka"),
+            ("How many years of experience working with GCP?", "text", "years_gcp"),
+            ("Current CTC?", "text", "current_ctc"),
+            ("Expected CTC?", "text", "expected_ctc"),
+        ]
+        for label, input_type, expected in cases:
+            with self.subTest(label=label):
+                self.assertEqual(_classify_field(label, label, input_type), expected)
+
     def test_cover_letter_is_not_mistaken_for_resume(self):
         self.assertEqual(_classify_field("Cover letter", "cover_letter", "file"), "manual")
 
