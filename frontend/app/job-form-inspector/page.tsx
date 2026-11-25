@@ -24,6 +24,10 @@ type AgentResult = {
   visible_text?: string[];
   page_title?: string | null;
   screenshots_captured?: number;
+  application_form_opened?: boolean;
+  apply_action?: string;
+  form_controls_detected?: number;
+  form_flow?: { multi_step?: boolean | null; steps_observed?: string[]; conditional_fields?: string[]; branching_evidence?: string[]; submit_button_present?: boolean; submission_performed?: boolean };
   note?: string | null;
 };
 
@@ -52,6 +56,11 @@ function AgentCard({ title, subtitle, result }: { title: string; subtitle: strin
       <div className="text-xs font-semibold tracking-[0.18em] text-cyan-300">{subtitle}</div>
       <h2 className="mt-2 text-xl font-semibold">{title}</h2>
       <div className="mt-2 text-xs text-slate-500">{result?.source ?? "Waiting for result"}</div>
+      {title.includes("Visual") && result && <div className="mt-3 rounded-lg bg-black/20 p-3 text-xs text-slate-300">
+        <div>Application form opened: <strong>{result.application_form_opened ? "Yes" : "No"}</strong></div>
+        <div>Action: {result.apply_action ?? "unknown"} · Screenshots: {result.screenshots_captured ?? 0} · Visible controls: {result.form_controls_detected ?? 0}</div>
+        <div className="mt-1 text-emerald-300">Application submission: Never performed</div>
+      </div>}
 
       <h3 className="mt-6 font-semibold">Detected fields ({result?.fields?.length ?? 0})</h3>
       {result?.fields?.length ? (
@@ -74,6 +83,16 @@ function AgentCard({ title, subtitle, result }: { title: string; subtitle: strin
         </div>
       ) : (
         <p className="mt-3 text-sm text-slate-500">No fields detected, or this agent did not return a result.</p>
+      )}
+
+      {!!result?.form_flow && title.includes("Visual") && (
+        <div className="mt-6 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.04] p-4">
+          <h3 className="font-semibold">Form flow analysis</h3>
+          <p className="mt-2 text-sm text-slate-300">Multi-step: {result.form_flow.multi_step === null || result.form_flow.multi_step === undefined ? "Unknown" : result.form_flow.multi_step ? "Yes" : "No"} · Submit button visible: {result.form_flow.submit_button_present ? "Yes" : "No"}</p>
+          {!!result.form_flow.steps_observed?.length && <ComparisonList title="Steps observed" values={result.form_flow.steps_observed} />}
+          {!!result.form_flow.conditional_fields?.length && <ComparisonList title="Conditional fields" values={result.form_flow.conditional_fields} />}
+          {!!result.form_flow.branching_evidence?.length && <ComparisonList title="Branching evidence" values={result.form_flow.branching_evidence} />}
+        </div>
       )}
 
       {!!result?.instructions?.length && (
@@ -143,8 +162,9 @@ export default function JobFormInspectorPage() {
           <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Job form inspector</h1>
           <p className="mt-3 max-w-3xl leading-7 text-slate-400">
             Paste a public Greenhouse job URL. The HTML agent extracts form-related requirements
-            from source content, while the visual agent examines Playwright screenshots. Compare
-            their findings independently; neither agent fills or submits an application.
+            from source content. The visual agent clicks Apply only when the target is the same
+            Greenhouse job and inspects the form screenshots. Compare findings independently; neither
+            agent fills fields or submits an application.
           </p>
         </header>
 
@@ -168,8 +188,8 @@ export default function JobFormInspectorPage() {
             </button>
           </div>
           <p className="mt-3 text-xs text-slate-500">
-            This first version supports public Greenhouse postings. The visual result only covers the
-            captured job page screenshots; it does not navigate into an application form.
+            Supports public Greenhouse postings. Playwright may open the same job’s application form;
+            external destinations and final submission are blocked. This is read-only inspection.
           </p>
         </form>
 
