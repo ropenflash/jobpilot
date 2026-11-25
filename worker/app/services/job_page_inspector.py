@@ -94,13 +94,14 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
         async def guard_main_frame_navigation(route):
             request = route.request
             if request.is_navigation_request() and request.frame == page.main_frame:
-                try:
-                    redirected_board, redirected_job_id = parse_greenhouse_job_url(request.url)
-                except Exception:
-                    await route.abort()
-                    return
-                is_job_page = redirected_board == board_token and redirected_job_id == job_id
                 is_apply_page = is_allowed_application_url(request.url)
+                is_job_page = False
+                if not is_apply_page:
+                    try:
+                        redirected_board, redirected_job_id = parse_greenhouse_job_url(request.url)
+                        is_job_page = redirected_board == board_token and redirected_job_id == job_id
+                    except Exception:
+                        is_job_page = False
                 if not is_job_page and not is_apply_page:
                     await route.abort()
                     return
