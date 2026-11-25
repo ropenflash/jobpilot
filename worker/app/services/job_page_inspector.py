@@ -70,6 +70,8 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
             service_workers="block",
         )
         page = await context.new_page()
+        # Defense in depth: inspection browser cannot submit any form.
+        await page.add_init_script("""document.addEventListener(\"submit\", event => { event.preventDefault(); event.stopImmediatePropagation(); }, true);""")
         page.set_default_navigation_timeout(45000)
         page.set_default_timeout(8000)
 
@@ -122,7 +124,7 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
         apply_action = "already_on_application_form" if application_form_opened else "not_attempted"
         if navigate_to_apply and not application_form_opened:
             # Only click an Apply affordance whose target is a same-board, same-job /apply route.
-            candidates = page.locator("a[href], button, [role=button]").filter(has_text=re.compile(r"apply", re.I))
+            candidates = page.locator("a[href], button:not([type=submit]), [role=button]:not([type=submit])").filter(has_text=re.compile(r"apply", re.I))
             for index in range(min(await candidates.count(), 12)):
                 candidate = candidates.nth(index)
                 try:
