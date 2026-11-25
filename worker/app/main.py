@@ -20,6 +20,7 @@ from app.schemas.application import (
     SubmitApplicationRequest,
 )
 from app.services.greenhouse import fetch_greenhouse_job
+from app.services.job_form_inspector import InspectJobFormRequest, inspect_job_form
 from app.services.job_page_inspector import inspect_greenhouse_job_page
 from app.services.vertex_client import (
     VertexError,
@@ -148,6 +149,20 @@ async def parse_resume(file: UploadFile = File(...)):
             status_code=502,
             detail=f"The model returned a profile that does not match the expected fields: {fields}.",
         ) from exc
+
+
+@app.post("/jobs/inspect-form")
+async def inspect_job_form_endpoint(request: InspectJobFormRequest):
+    """Run independent HTML and screenshot agents against a public Greenhouse job."""
+    try:
+        return await inspect_job_form(str(request.url))
+    except HTTPException:
+        raise
+    except VertexError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Dual-agent job form inspection failed.")
+        raise HTTPException(status_code=502, detail="Job form inspection failed.") from exc
 
 
 @app.post("/jobs/analyze", response_model=JobAnalysisResponse)
