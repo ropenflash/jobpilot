@@ -17,7 +17,7 @@ def _parse_json(raw: str) -> dict:
 
 
 async def inspect_visual_job_agent(job: dict, inspection: dict) -> dict:
-    """Inspect rendered Playwright screenshots for visible application form controls."""
+    """Inspect rendered Playwright screenshots and visible DOM metadata for application form controls."""
     screenshots = [
         item for item in (inspection.get("screenshots") or [])
         if isinstance(item, bytes) and item
@@ -49,11 +49,17 @@ Return JSON with keys:
 - visible_text: array of useful snippets visible in the screenshots
 - instructions: array of visible application instructions
 - limitations: array of content that may be below the captured viewport or not visible
+- form_flow: object with multi_step (boolean|null), steps_observed (array), conditional_fields (array), branching_evidence (array), submit_button_present (boolean), submission_performed (false)
 
 Identify controls only if they are actually visible, such as text inputs, email, phone,
 file upload, select, checkbox, textarea, resume upload, cover letter, or screening questions.
 Do not claim a form is present if the screenshots show only a job description.
-No candidate values and no submission actions.
+No candidate values. Never click submit, send an application, or trigger a final submission.
+
+Visible DOM control metadata (labels, types, required flags, select options; values intentionally omitted):
+{json.dumps(inspection.get('form_controls', []), ensure_ascii=False)}
+
+Application form navigation status: {json.dumps({"application_form_opened": inspection.get("application_form_opened"), "apply_action": inspection.get("apply_action")})}
 
 Job context: {json.dumps({"title": job.get("title"), "company": job.get("company"),
 "job_url": job.get("job_url"), "page_title": inspection.get("page_title"),
@@ -80,4 +86,8 @@ Job context: {json.dumps({"title": job.get("title"), "company": job.get("company
     result.setdefault("visible_text", [])
     result.setdefault("instructions", [])
     result.setdefault("limitations", [])
+    result.setdefault("form_flow", {"multi_step": None, "steps_observed": [], "conditional_fields": [], "branching_evidence": [], "submit_button_present": False, "submission_performed": False})
+    result["form_flow"]["submission_performed"] = False
+    result.setdefault("application_form_opened", inspection.get("application_form_opened", False))
+    result.setdefault("apply_action", inspection.get("apply_action", "not_attempted"))
     return result
