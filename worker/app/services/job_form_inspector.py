@@ -54,11 +54,6 @@ async def inspect_job_form(url: str) -> dict[str, Any]:
     visual_result["form_controls_detected"] = len(visual_context.get("form_controls") or [])
     visual_result["form_flow"] = visual_result.get("form_flow") or {}
     visual_result["form_flow"]["submission_performed"] = False
-    visual_result["application_form_opened"] = visual_context.get("application_form_opened", False)
-    visual_result["apply_action"] = visual_context.get("apply_action", "not_attempted")
-    visual_result["form_controls_detected"] = len(visual_context.get("form_controls") or [])
-    visual_result["form_flow"] = visual_result.get("form_flow") or {}
-    visual_result["form_flow"]["submission_performed"] = False
 
     return {
         "job": {
