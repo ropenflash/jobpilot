@@ -25,6 +25,7 @@ export default async function Home() {
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <a href="/jobs" className="rounded-xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950">Analyze a job</a>
+              <a href="/job-form-inspector" className="rounded-xl border border-cyan-300/40 px-5 py-3 text-cyan-200">Dual-agent form inspector</a>
               <a href="/profile" className="rounded-xl border border-white/15 px-5 py-3 text-slate-200">Career profile</a>
             </div>
           </div>
