@@ -45,6 +45,46 @@ public class JobController {
 
     public record AnalyzeJobRequest(@NotBlank String url) {}
 
+    @PostMapping(value = "/inspect-form", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> inspectJobForm(@Valid @RequestBody AnalyzeJobRequest request) {
+        Map<String, Object> workerRequest = Map.of("url", request.url().trim());
+        try {
+            Map<String, Object> result = workerClient.post()
+                .uri("/jobs/inspect-form")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .body(workerRequest)
+                .retrieve()
+                .body(new ParameterizedTypeReference<Map<String, Object>>() {});
+            if (result == null || !(result.get("agents") instanceof Map<?, ?>)
+                    || !(result.get("job") instanceof Map<?, ?>)) {
+                throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY, "Worker returned an incomplete dual-agent inspection."
+                );
+            }
+            return result;
+        } catch (RestClientResponseException ex) {
+            HttpStatus status = ex.getStatusCode().is4xxClientError()
+                ? HttpStatus.valueOf(ex.getStatusCode().value())
+                : HttpStatus.BAD_GATEWAY;
+            throw new ResponseStatusException(
+                status,
+                ex.getResponseBodyAsString() == null || ex.getResponseBodyAsString().isBlank()
+                    ? "Job form inspection worker failed."
+                    : ex.getResponseBodyAsString(),
+                ex
+            );
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_GATEWAY,
+                "Could not communicate with the Python worker: " + ex.getMessage(),
+                ex
+            );
+        }
+    }
+
     @PostMapping(value = "/analyze", consumes = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, Object> analyzeJob(@Valid @RequestBody AnalyzeJobRequest request) {
         CareerProfile profile = mongo.findById("default", CareerProfile.class);
