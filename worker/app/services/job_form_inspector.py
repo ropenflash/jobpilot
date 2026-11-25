@@ -39,13 +39,21 @@ async def inspect_job_form(url: str) -> dict[str, Any]:
             "page_title": None,
             "page_headings": [],
             "rendered_text": "",
-            "form_controls": [],\n            "application_form_opened": False,\n            "apply_action": "unavailable",\n            "note": "Playwright could not render this Greenhouse job page.",
+            "form_controls": [],
+            "application_form_opened": False,
+            "apply_action": "unavailable",
+            "note": "Playwright could not render this Greenhouse job page.",
         }
 
     visual_result = await inspect_visual_job_agent(job, visual_context)
     visual_result["page_title"] = visual_result.get("page_title") or visual_context.get("page_title")
     visual_result["screenshots_captured"] = len(visual_context.get("screenshots") or [])
     visual_result["note"] = visual_context.get("note")
+    visual_result["application_form_opened"] = visual_context.get("application_form_opened", False)
+    visual_result["apply_action"] = visual_context.get("apply_action", "not_attempted")
+    visual_result["form_controls_detected"] = len(visual_context.get("form_controls") or [])
+    visual_result["form_flow"] = visual_result.get("form_flow") or {}
+    visual_result["form_flow"]["submission_performed"] = False
     visual_result["application_form_opened"] = visual_context.get("application_form_opened", False)
     visual_result["apply_action"] = visual_context.get("apply_action", "not_attempted")
     visual_result["form_controls_detected"] = len(visual_context.get("form_controls") or [])
