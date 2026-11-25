@@ -31,7 +31,7 @@ async def inspect_job_form(url: str) -> dict[str, Any]:
     html_result = await inspect_html_job_agent(job)
 
     try:
-        visual_context = await inspect_greenhouse_job_page(url)
+        visual_context = await inspect_greenhouse_job_page(url, navigate_to_apply=True)
     except Exception:
         visual_context = {
             "status": "unavailable",
@@ -39,7 +39,7 @@ async def inspect_job_form(url: str) -> dict[str, Any]:
             "page_title": None,
             "page_headings": [],
             "rendered_text": "",
-            "note": "Playwright could not render this Greenhouse job page.",
+            "form_controls": [],\n            "application_form_opened": False,\n            "apply_action": "unavailable",\n            "note": "Playwright could not render this Greenhouse job page.",
         }
 
     visual_result = await inspect_visual_job_agent(job, visual_context)
