@@ -1,4 +1,5 @@
 import os
+import re
 from playwright.async_api import async_playwright
 
 from app.services.greenhouse import parse_greenhouse_job_url
@@ -6,6 +7,7 @@ from app.services.greenhouse import parse_greenhouse_job_url
 
 VIEWPORT = {"width": 1440, "height": 1000}
 MAX_SCREENSHOTS = 5
+APPLICATION_PATH = re.compile(r"^/([A-Za-z0-9_-]+)/jobs/([0-9]+)/apply/?$")
 
 
 def _enabled() -> bool:
@@ -37,8 +39,8 @@ def _screenshot_offsets(content_height: int, viewport_height: int, limit: int) -
     return offsets
 
 
-async def inspect_greenhouse_job_page(url: str) -> dict:
-    """Render an allow-listed Greenhouse job and capture in-memory viewport screenshots.
+async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False) -> dict:
+    """Render an allow-listed Greenhouse job, optionally open its application form, and capture screenshots.
 
     Screenshots are returned to the caller for one multimodal model request. They are not
     written to disk or retained in the browser session.
@@ -71,6 +73,24 @@ async def inspect_greenhouse_job_page(url: str) -> dict:
         page.set_default_navigation_timeout(45000)
         page.set_default_timeout(8000)
 
+        allowed_application_url = None
+
+        def is_allowed_application_url(candidate: str) -> bool:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(candidate)
+                match = APPLICATION_PATH.fullmatch(parsed.path)
+                return (
+                    parsed.scheme == "https"
+                    and parsed.hostname in {"boards.greenhouse.io", "job-boards.greenhouse.io"}
+                    and not parsed.username and not parsed.password and parsed.port is None
+                    and match is not None
+                    and match.group(1) == board_token
+                    and int(match.group(2)) == job_id
+                )
+            except (ValueError, TypeError):
+                return False
+
         async def guard_main_frame_navigation(route):
             request = route.request
             if request.is_navigation_request() and request.frame == page.main_frame:
@@ -79,7 +99,9 @@ async def inspect_greenhouse_job_page(url: str) -> dict:
                 except Exception:
                     await route.abort()
                     return
-                if redirected_board != board_token or redirected_job_id != job_id:
+                is_job_page = redirected_board == board_token and redirected_job_id == job_id
+                is_apply_page = is_allowed_application_url(request.url)
+                if not is_job_page and not is_apply_page:
                     await route.abort()
                     return
             await route.continue_()
@@ -89,10 +111,42 @@ async def inspect_greenhouse_job_page(url: str) -> dict:
         response = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
         await page.wait_for_timeout(900)
 
-        # Do not follow a redirect to a different host or a different job.
-        final_board_token, final_job_id = parse_greenhouse_job_url(page.url)
-        if final_board_token != board_token or final_job_id != job_id:
-            raise ValueError("The rendered page redirected to a different Greenhouse job.")
+        # Do not follow a redirect to a different host, board, or job.
+        if not (is_allowed_application_url(page.url)):
+            final_board_token, final_job_id = parse_greenhouse_job_url(page.url)
+            if final_board_token != board_token or final_job_id != job_id:
+                raise ValueError("The rendered page redirected to a different Greenhouse job.")
+
+        application_form_opened = is_allowed_application_url(page.url)
+        apply_action = "already_on_application_form" if application_form_opened else "not_attempted"
+        if navigate_to_apply and not application_form_opened:
+            # Only click an Apply affordance whose target is a same-board, same-job /apply route.
+            candidates = page.locator("a[href], button, [role=button]").filter(has_text=re.compile(r"apply", re.I))
+            for index in range(min(await candidates.count(), 12)):
+                candidate = candidates.nth(index)
+                try:
+                    href = await candidate.get_attribute("href")
+                    if href:
+                        from urllib.parse import urljoin
+                        target = urljoin(page.url, href)
+                        if not is_allowed_application_url(target):
+                            continue
+                    await candidate.click(timeout=3500)
+                    await page.wait_for_timeout(700)
+                    if is_allowed_application_url(page.url):
+                        application_form_opened = True
+                        apply_action = "clicked_apply"
+                        break
+                    # Inline forms may reveal without navigation. Detect visible form controls.
+                    visible_controls = await page.locator("input:not([type=hidden]), textarea, select").evaluate_all(
+                        "(els) => els.filter(e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)).length"
+                    )
+                    if visible_controls:
+                        application_form_opened = True
+                        apply_action = "opened_inline_form"
+                        break
+                except Exception:
+                    continue
 
         page_title = (await page.title()).strip()[:240] or None
         try:
@@ -110,6 +164,9 @@ async def inspect_greenhouse_job_page(url: str) -> dict:
         except Exception:
             rendered_text = ""
         rendered_text = rendered_text[:12000]
+
+        # Extract only visible control metadata; never collect entered values.
+        form_controls = await page.locator("input:not([type=hidden]), textarea, select, [role=checkbox], [role=radio]").evaluate_all("""els => els.filter(e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)).slice(0,100).map(e => ({ tag:e.tagName.toLowerCase(), type:e.getAttribute("type") || (e.tagName.toLowerCase()==="select" ? "select" : e.tagName.toLowerCase()), name:e.getAttribute("name"), id:e.id || null, label:(e.labels && Array.from(e.labels).map(l=>l.innerText).join(" ")) || e.getAttribute("aria-label") || e.getAttribute("placeholder") || null, required:!!e.required || e.getAttribute("aria-required")==="true", options:e.tagName.toLowerCase()==="select" ? Array.from(e.options).map(o=>o.text).slice(0,30) : [], visible:true }))""")
 
         dimensions = await page.evaluate("""() => ({
           height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
@@ -148,6 +205,9 @@ async def inspect_greenhouse_job_page(url: str) -> dict:
             "page_title": page_title,
             "page_headings": page_headings,
             "rendered_text": rendered_text,
+            "form_controls": form_controls,
+            "application_form_opened": application_form_opened,
+            "apply_action": apply_action,
             "note": note,
         }
     finally:
