@@ -31,7 +31,7 @@ async def inspect_job_form(url: str) -> dict[str, Any]:
         visual_context = {
             "status": "unavailable", "screenshots": [], "page_title": None,
             "page_url": url, "page_headings": [], "rendered_text": "",
-            "form_controls": [], "links": [], "buttons": [], "instructions: [],
+            "form_controls": [], "links": [], "buttons": [], "instructions": [],
             "application_form_opened": False, "apply_action": "unavailable",
             "note": "Playwright could not render this Greenhouse job page.",
         }
