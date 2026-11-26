@@ -104,7 +104,7 @@ def _external_application_hint(page_text: str, links: list[dict]) -> str | None:
     text = (page_text or "").lower()
     explicit_redirect = any(phrase in text for phrase in (
         "instead should use", "instead use", "do not need to complete this",
-        "does not need to complete this application", "complete the application form",
+        "does not need to complete this application",
         "use the provided link", "apply through the following", "apply via the following",
         "you will not be considered unless you complete",
     ))
