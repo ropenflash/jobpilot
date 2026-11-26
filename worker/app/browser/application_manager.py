@@ -598,7 +598,7 @@ class ApplicationSessionManager:
             )
 
     async def _snapshot_fields(self, frame) -> list[dict]:
-        rows = await frame.locator(FIELD_SELECTOR).evaluate_all("""elements => elements.map((el, index) => {
+        rows = await frame.locator(FIELD_SELECTOR).evaluate_all(r"""elements => elements.map((el, index) => {
           const role = (el.getAttribute('role') || '').toLowerCase();
           const nativeType = (el.getAttribute('type') || '').toLowerCase();
           const type = role === 'checkbox' ? 'checkbox' : role === 'radio' ? 'radio' :
@@ -1170,7 +1170,7 @@ class ApplicationSessionManager:
             for index in range(count):
                 candidate = file_inputs.nth(index)
                 try:
-                    metadata = await candidate.evaluate("""el => {
+                    metadata = await candidate.evaluate(r"""el => {
                       const labels = el.labels ? Array.from(el.labels).map(x => x.innerText).filter(Boolean) : [];
                       const parentLabel = el.closest('label')?.innerText || '';
                       const labelledBy = el.getAttribute('aria-labelledby');
