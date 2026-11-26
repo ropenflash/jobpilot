@@ -59,6 +59,11 @@ async def inspect_job_form(url: str) -> dict[str, Any]:
         "links": visual_context.get("links") or [],
         "buttons": visual_context.get("buttons") or [],
         "rendered_text": visual_context.get("rendered_text") or "",
+        "html_agent": {
+            "job_requirements": html_result.get("job_requirements") or [],
+            "screening_questions": html_result.get("screening_questions") or [],
+            "external_application": html_result.get("external_application"),
+        },
     }
     workflow = await analyze_application_workflow(workflow_evidence, job)
     workflow["inspection_only"] = True
