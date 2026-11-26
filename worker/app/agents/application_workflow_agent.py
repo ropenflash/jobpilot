@@ -101,6 +101,7 @@ async def analyze_application_workflow(page: dict, job: dict | None = None) -> d
         "controls": (page.get("form_controls") or [])[:100],
         "links": (page.get("links") or [])[:100],
         "buttons": (page.get("buttons") or [])[:50],
+        "html_agent_evidence": page.get("html_agent") or {},
         "job": {
             "title": (job or {}).get("title"),
             "company": (job or {}).get("company"),
@@ -135,7 +136,7 @@ Rules:
 - An explicit instruction to apply on a different platform is external_application; do not recommend submitting the current form.
 - Select dropdowns may be acknowledgments or workflow branches. Interpret their option text and surrounding context; don't treat every select as a candidate profile field.
 - Identify the relevant application link, not generic links. Only use URLs present in the evidence.
-- A link to another form is a destination to inspect in a later, separately authorized step. Do not assume the form fields.
+- A link to another form is a destination to inspect in a later, separately authorized step. Do not assume the form fields. Use HTML agent evidence as corroboration, not as proof of live controls.
 - Never recommend selecting consent, eligibility, legal, demographic, or screening answers without candidate confirmation.
 - For unknown or conflicting evidence, choose manual_intervention or unknown and explain.
 - Include stop conditions for CAPTCHA, unsupported forms, ambiguous required answers, and final submission.
