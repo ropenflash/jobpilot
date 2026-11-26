@@ -28,12 +28,16 @@ type AgentResult = {
   apply_action?: string;
   form_controls_detected?: number;
   form_flow?: { multi_step?: boolean | null; steps_observed?: string[]; conditional_fields?: string[]; branching_evidence?: string[]; submit_button_present?: boolean; submission_performed?: boolean };
+  job_requirements?: { requirement?: string; category?: string; evidence?: string; confidence?: string }[];
+  screening_questions?: { question?: string; required?: boolean | null; evidence?: string; confidence?: string }[];
   note?: string | null;
 };
 
 type InspectionResult = {
   job: { title: string; company: string; location?: string | null; job_url: string };
   agents: { html: AgentResult; visual: AgentResult };
+  workflow?: { workflow_type?: string; confidence?: number; rationale?: string; external_application_url?: string | null; relevant_links?: { text?: string; href?: string | null; context?: string; reason?: string }[]; required_actions?: { action?: string; target?: string; value?: string | null; url?: string | null; reason?: string }[]; stop_conditions?: string[]; analysis_source?: string; inspection_only?: boolean; navigation_performed?: boolean; submission_performed?: boolean };
+  page_evidence?: { instructions?: string[]; links?: { text?: string; href?: string; context?: string }[]; buttons?: { text?: string; disabled?: boolean }[]; controls?: { label?: string; type?: string; required?: boolean; options?: { text?: string; value?: string }[] }[] };
   comparison: {
     shared_fields: string[];
     html_only_fields: string[];
@@ -85,6 +89,29 @@ function AgentCard({ title, subtitle, result }: { title: string; subtitle: strin
         <p className="mt-3 text-sm text-slate-500">No fields detected, or this agent did not return a result.</p>
       )}
 
+      {!!result?.job_requirements?.length && title.includes("HTML") && (
+        <div className="mt-6 rounded-xl border border-amber-300/20 bg-amber-300/[0.04] p-4">
+          <h3 className="font-semibold">Job requirements (not form controls)</h3>
+          <div className="mt-3 space-y-2">
+            {result.job_requirements.map((item, index) => <article key={index} className="rounded-lg bg-black/20 p-3">
+              <div className="font-medium">{item.requirement}</div>
+              <div className="mt-1 text-xs text-slate-500">{item.category || "Requirement"} · {item.confidence || "confidence not provided"}</div>
+              {item.evidence && <p className="mt-2 text-sm text-slate-400">{item.evidence}</p>}
+            </article>)}
+          </div>
+        </div>
+      )}
+      {!!result?.screening_questions?.length && title.includes("HTML") && (
+        <div className="mt-6 rounded-xl border border-violet-300/20 bg-violet-300/[0.04] p-4">
+          <h3 className="font-semibold">Screening questions mentioned in posting</h3>
+          <ul className="mt-3 space-y-2 text-sm text-slate-300">
+            {result.screening_questions.map((item, index) => <li key={index} className="rounded-lg bg-black/20 p-3">
+              <div>{item.question}</div><div className="mt-1 text-xs text-slate-500">Required: {item.required == null ? "Unknown" : item.required ? "Yes" : "No"}</div>
+              {item.evidence && <div className="mt-1 text-xs text-slate-400">{item.evidence}</div>}
+            </li>)}
+          </ul>
+        </div>
+      )}
       {!!result?.form_flow && title.includes("Visual") && (
         <div className="mt-6 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.04] p-4">
           <h3 className="font-semibold">Form flow analysis</h3>
@@ -212,6 +239,8 @@ export default function JobFormInspectorPage() {
               </div>
             </section>
 
+            <WorkflowCard workflow={result.workflow} evidence={result.page_evidence} />
+
             <section className="mt-5 grid gap-5 lg:grid-cols-2">
               <AgentCard title="HTML requirements agent" subtitle="AGENT 01 · STRUCTURED SOURCE" result={result.agents.html} />
               <AgentCard title="Playwright visual agent" subtitle="AGENT 02 · SCREENSHOT EVIDENCE" result={result.agents.visual} />
@@ -229,6 +258,53 @@ export default function JobFormInspectorPage() {
       </div>
     </main>
   );
+}
+
+
+function WorkflowCard({ workflow, evidence }: { workflow?: InspectionResult["workflow"]; evidence?: InspectionResult["page_evidence"] }) {
+  const type = (workflow?.workflow_type || "unknown").replaceAll("_", " ");
+  return <section className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/[0.04] p-6">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <div className="text-xs font-semibold tracking-[0.18em] text-amber-200">WORKFLOW DISCOVERY</div>
+        <h2 className="mt-2 text-xl font-semibold capitalize">{type}</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-300">{workflow?.rationale || "No workflow classification was returned."}</p>
+      </div>
+      <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-300">
+        Confidence: {workflow?.confidence == null ? "unknown" : Math.round(workflow.confidence * 100) + "%"}
+      </span>
+    </div>
+    {workflow?.external_application_url && <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.04] p-4">
+      <div className="font-medium text-cyan-200">External application destination detected</div>
+      <p className="mt-1 text-sm text-slate-400">JobPilot has not navigated to this destination. Review it before continuing.</p>
+      <a href={workflow.external_application_url} target="_blank" rel="noreferrer" className="mt-2 inline-block break-all text-sm text-cyan-300 underline">{workflow.external_application_url}</a>
+    </div>}
+    {!!workflow?.relevant_links?.length && <div className="mt-4">
+      <h3 className="font-semibold">Relevant links</h3>
+      <ul className="mt-2 space-y-2">{workflow.relevant_links.map((link, index) => <li key={index} className="rounded-lg bg-black/20 p-3">
+        <div className="font-medium">{link.text || "Application link"}</div>
+        {link.href && <a href={link.href} target="_blank" rel="noreferrer" className="mt-1 block break-all text-xs text-cyan-300 underline">{link.href}</a>}
+        {link.reason && <p className="mt-1 text-sm text-slate-400">{link.reason}</p>}
+      </li>)}</ul>
+    </div>}
+    {!!workflow?.required_actions?.length && <div className="mt-4">
+      <h3 className="font-semibold">Suggested next actions (not executed)</h3>
+      <ul className="mt-2 space-y-2">{workflow.required_actions.map((action, index) => <li key={index} className="rounded-lg bg-black/20 p-3">
+        <div className="text-sm font-medium capitalize">{(action.action || "").replaceAll("_", " ")}{action.target ? " · " + action.target : ""}</div>
+        {action.reason && <p className="mt-1 text-sm text-slate-400">{action.reason}</p>}
+        {action.url && <a href={action.url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-xs text-cyan-300 underline">{action.url}</a>}
+      </li>)}</ul>
+    </div>}
+    {!!workflow?.stop_conditions?.length && <div className="mt-4">
+      <h3 className="font-semibold text-amber-200">Safety / stop conditions</h3>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{workflow.stop_conditions.map((item, index) => <li key={index}>{item}</li>)}</ul>
+    </div>}
+    {evidence?.instructions?.length ? <div className="mt-4">
+      <h3 className="font-semibold">Page instructions captured</h3>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-400">{evidence.instructions.map((item, index) => <li key={index}>{item}</li>)}</ul>
+    </div> : null}
+    <div className="mt-4 text-xs text-emerald-300">Read-only inspection · Navigation and submission not performed</div>
+  </section>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
