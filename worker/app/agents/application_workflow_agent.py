@@ -47,9 +47,9 @@ def _heuristic_workflow(page: dict) -> dict:
             if href.startswith("https://") and href not in relevant:
                 relevant.append(href)
     external_application = any(term in text for term in (
-        "instead should use", "instead use", "complete the application form", "apply through",
+        "instead should use", "instead use", "do not need to complete this", "apply through",
         "apply via", "application form at", "external application", "complete this application on",
-        "use the provided link", "apply on our website",
+        "use the provided link", "will not be considered unless you complete", "apply on our website",
     ))
     captcha = any(term in text for term in ("captcha", "verify you are human", "robot check", "security check"))
     conditional = any(term in text for term in ("if yes", "if no", "depending on your answer", "conditional question"))
