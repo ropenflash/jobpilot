@@ -9,7 +9,7 @@ def _parse_json(raw: str) -> dict:
         lines = text.splitlines()[1:]
         if lines and lines[-1].strip() == "```":
             lines.pop()
-        text = "\\n".join(lines).strip()
+        text = "\n".join(lines).strip()
     value = json.loads(text)
     if not isinstance(value, dict):
         raise ValueError("The agent response must be a JSON object.")
