@@ -1,5 +1,7 @@
 import os
 import re
+from urllib.parse import urljoin, urlparse
+
 from playwright.async_api import async_playwright
 
 from app.services.greenhouse import parse_greenhouse_job_url
@@ -40,46 +42,32 @@ def _screenshot_offsets(content_height: int, viewport_height: int, limit: int) -
 
 
 async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False) -> dict:
-    """Render an allow-listed Greenhouse job, optionally open its application form, and capture screenshots.
-
-    Screenshots are returned to the caller for one multimodal model request. They are not
-    written to disk or retained in the browser session.
-    """
+    """Read-only rendered-page inspection. Collect evidence; never follow external application links."""
     board_token, job_id = parse_greenhouse_job_url(url)
     if not _enabled():
         return {
-            "status": "disabled",
-            "screenshots": [],
-            "page_title": None,
-            "page_headings": [],
-            "rendered_text": "",
+            "status": "disabled", "screenshots": [], "page_title": None,
+            "page_headings": [], "rendered_text": "", "form_controls": [],
+            "links": [], "buttons": [], "instructions": [],
             "note": "Visual page inspection is disabled by configuration.",
         }
 
-    playwright = None
-    browser = None
-    context = None
+    playwright = browser = context = None
     try:
         playwright = await async_playwright().start()
         browser = await playwright.chromium.launch(headless=True)
         context = await browser.new_context(
-            viewport=VIEWPORT,
-            device_scale_factor=1,
-            locale="en-US",
-            accept_downloads=False,
-            service_workers="block",
+            viewport=VIEWPORT, device_scale_factor=1, locale="en-US",
+            accept_downloads=False, service_workers="block",
         )
         page = await context.new_page()
-        # Defense in depth: inspection browser cannot submit any form.
-        await page.add_init_script("""document.addEventListener(\"submit\", event => { event.preventDefault(); event.stopImmediatePropagation(); }, true);""")
+        # Inspection must remain read-only, even if a page has submit handlers.
+        await page.add_init_script("""document.addEventListener("submit", event => { event.preventDefault(); event.stopImmediatePropagation(); }, true);""")
         page.set_default_navigation_timeout(45000)
         page.set_default_timeout(8000)
 
-        allowed_application_url = None
-
         def is_allowed_application_url(candidate: str) -> bool:
             try:
-                from urllib.parse import urlparse
                 parsed = urlparse(candidate)
                 match = APPLICATION_PATH.fullmatch(parsed.path)
                 return (
@@ -109,13 +97,11 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
                     return
             await route.continue_()
 
-        # Validate redirects before Chromium is allowed to fetch the new top-level page.
         await page.route("**/*", guard_main_frame_navigation)
         response = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
         await page.wait_for_timeout(900)
 
-        # Do not follow a redirect to a different host, board, or job.
-        if not (is_allowed_application_url(page.url)):
+        if not is_allowed_application_url(page.url):
             final_board_token, final_job_id = parse_greenhouse_job_url(page.url)
             if final_board_token != board_token or final_job_id != job_id:
                 raise ValueError("The rendered page redirected to a different Greenhouse job.")
@@ -123,14 +109,12 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
         application_form_opened = is_allowed_application_url(page.url)
         apply_action = "already_on_application_form" if application_form_opened else "not_attempted"
         if navigate_to_apply and not application_form_opened:
-            # Only click an Apply affordance whose target is a same-board, same-job /apply route.
             candidates = page.locator("a[href], button:not([type=submit]), [role=button]:not([type=submit])").filter(has_text=re.compile(r"apply", re.I))
             for index in range(min(await candidates.count(), 12)):
                 candidate = candidates.nth(index)
                 try:
                     href = await candidate.get_attribute("href")
                     if href:
-                        from urllib.parse import urljoin
                         target = urljoin(page.url, href)
                         if not is_allowed_application_url(target):
                             continue
@@ -140,7 +124,6 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
                         application_form_opened = True
                         apply_action = "clicked_apply"
                         break
-                    # Inline forms may reveal without navigation. Detect visible form controls.
                     visible_controls = await page.locator("input:not([type=hidden]), textarea, select").evaluate_all(
                         "(els) => els.filter(e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)).length"
                     )
@@ -157,19 +140,64 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
         except Exception:
             headings = []
         page_headings = list(dict.fromkeys(
-            " ".join(value.split())[:180]
-            for value in headings
-            if value and value.strip()
+            " ".join(value.split())[:180] for value in headings if value and value.strip()
         ))[:30]
-
         try:
             rendered_text = await page.locator("body").inner_text(timeout=8000)
         except Exception:
             rendered_text = ""
-        rendered_text = rendered_text[:12000]
+        rendered_text = rendered_text[:20000]
 
-        # Extract only visible control metadata; never collect entered values.
-        form_controls = await page.locator("input:not([type=hidden]), textarea, select, [role=checkbox], [role=radio]").evaluate_all("""els => els.filter(e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)).slice(0,100).map(e => ({ tag:e.tagName.toLowerCase(), type:e.getAttribute("type") || (e.tagName.toLowerCase()==="select" ? "select" : e.tagName.toLowerCase()), name:e.getAttribute("name"), id:e.id || null, label:(e.labels && Array.from(e.labels).map(l=>l.innerText).join(" ")) || e.getAttribute("aria-label") || e.getAttribute("placeholder") || null, required:!!e.required || e.getAttribute("aria-required")==="true", options:e.tagName.toLowerCase()==="select" ? Array.from(e.options).map(o=>o.text).slice(0,30) : [], visible:true }))""")
+        form_controls = await page.locator(
+            "input:not([type=hidden]), textarea, select, [role=checkbox], [role=radio], "
+            "[role=combobox], [aria-haspopup=listbox]"
+        ).evaluate_all("""els => els.filter(e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)).slice(0,100).map(e => {
+          const labels = e.labels ? Array.from(e.labels).map(l => (l.innerText || l.textContent || '').trim()).filter(Boolean) : [];
+          const labelledBy = e.getAttribute('aria-labelledby');
+          const ariaLabelled = labelledBy ? labelledBy.split(/\\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ') : '';
+          const parent = e.closest('[data-field], .field, .form-field, fieldset, .question') || e.parentElement;
+          const context = parent ? (parent.innerText || parent.textContent || '').trim() : '';
+          const options = e.tagName.toLowerCase() === 'select' || e.getAttribute('role') === 'combobox'
+            ? Array.from(e.options || []).map(o => ({text:(o.textContent || '').trim(), value:o.value, disabled:!!o.disabled})).slice(0,50)
+            : [];
+          return {
+            tag:e.tagName.toLowerCase(),
+            type:e.getAttribute('type') || (e.tagName.toLowerCase()==='select' ? 'select' : e.tagName.toLowerCase()),
+            name:e.getAttribute('name'), id:e.id || null,
+            label:labels.join(' ') || ariaLabelled || e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.getAttribute('name') || e.id || null,
+            placeholder:e.getAttribute('placeholder'),
+            required:!!e.required || e.getAttribute('aria-required')==='true',
+            accept:e.getAttribute('accept'), autocomplete:e.getAttribute('autocomplete'),
+            options, context:context.slice(0,500), visible:true
+          };
+        })""")
+
+        links = await page.locator("a[href]").evaluate_all("""els => els.filter(a => !!(a.offsetWidth || a.offsetHeight || a.getClientRects().length)).slice(0,150).map(a => {
+          const parent = a.closest('p, li, section, article, fieldset, .field, .form-field') || a.parentElement;
+          return {
+            text:(a.innerText || a.textContent || '').trim().slice(0,300),
+            href:a.href, target:a.target || null,
+            context:(parent ? (parent.innerText || parent.textContent || '') : '').trim().slice(0,700),
+            visible:true
+          };
+        })""")
+        buttons = await page.locator("button, [role=button], input[type=submit]").evaluate_all("""els => els.filter(e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)).slice(0,80).map(e => ({
+          text:(e.innerText || e.textContent || e.getAttribute('aria-label') || '').trim().slice(0,250),
+          type:e.getAttribute('type'), disabled:!!e.disabled,
+          context:(e.parentElement ? (e.parentElement.innerText || '').trim() : '').slice(0,400)
+        }))""")
+
+        # Short, evidence-derived instruction snippets; the LLM workflow agent will classify these.
+        instruction_patterns = re.compile(
+            r"(apply (?:through|via|on|at)|complete.{0,100}application|instead.{0,100}(?:apply|application)|"
+            r"use the provided link|register your interest|must.{0,100}(?:complete|submit|apply)|"
+            r"application.{0,100}(?:required|form|link))", re.I
+        )
+        instructions = list(dict.fromkeys(
+            " ".join(line.split())[:700]
+            for line in rendered_text.splitlines()
+            if line.strip() and instruction_patterns.search(line)
+        ))[:40]
 
         dimensions = await page.evaluate("""() => ({
           height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
@@ -180,17 +208,13 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
             int(dimensions.get("viewport") or VIEWPORT["height"]),
             _screenshot_limit(),
         )
-
         screenshots: list[bytes] = []
         for offset in offsets:
             await page.evaluate("(top) => window.scrollTo(0, top)", offset)
             await page.wait_for_timeout(180)
             screenshot = await page.screenshot(
-                type="jpeg",
-                quality=72,
-                full_page=False,
-                animations="disabled",
-                timeout=15000,
+                type="jpeg", quality=72, full_page=False,
+                animations="disabled", timeout=15000,
             )
             if screenshot:
                 screenshots.append(screenshot)
@@ -206,9 +230,13 @@ async def inspect_greenhouse_job_page(url: str, navigate_to_apply: bool = False)
             "status": "completed" if screenshots else "unavailable",
             "screenshots": screenshots,
             "page_title": page_title,
+            "page_url": page.url,
             "page_headings": page_headings,
             "rendered_text": rendered_text,
             "form_controls": form_controls,
+            "links": links,
+            "buttons": buttons,
+            "instructions": instructions,
             "application_form_opened": application_form_opened,
             "apply_action": apply_action,
             "note": note,
