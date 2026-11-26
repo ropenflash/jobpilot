@@ -118,7 +118,7 @@ def _external_application_hint(page_text: str, links: list[dict]) -> str | None:
             str(link.get("href") or ""),
         )).lower()
         href = str(link.get("href") or "")
-        if href.startswith("https://") and re.search(r"application|apply|form|register|program|candidate", signal):
+        if href.startswith("https://") and urlparse(href).hostname not in ALLOWED_GREENHOUSE_HOSTS and re.search(r"application|apply|form|register|program|candidate", signal):
             if href not in relevant:
                 relevant.append(href)
     return relevant[0] if relevant else None
