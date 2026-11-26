@@ -29,9 +29,10 @@ class JobFormInspectorTests(unittest.IsolatedAsyncioTestCase):
     @patch("app.services.job_form_inspector.inspect_visual_job_agent", new_callable=AsyncMock)
     @patch("app.services.job_form_inspector.inspect_greenhouse_job_page", new_callable=AsyncMock)
     @patch("app.services.job_form_inspector.inspect_html_job_agent", new_callable=AsyncMock)
+    @patch("app.services.job_form_inspector.analyze_application_workflow", new_callable=AsyncMock)
     @patch("app.services.job_form_inspector.fetch_greenhouse_job", new_callable=AsyncMock)
     async def test_runs_two_agents_independently_and_hides_image_bytes(
-        self, fetch_job, html_agent, inspect_page, visual_agent
+        self, fetch_job, workflow_agent, html_agent, inspect_page, visual_agent
     ):
         fetch_job.return_value = JOB
         html_agent.return_value = {
@@ -52,11 +53,21 @@ class JobFormInspectorTests(unittest.IsolatedAsyncioTestCase):
             "instructions": [],
             "limitations": [],
         }
+        workflow_agent.return_value = {
+            "workflow_type": "standard_form",
+            "confidence": 0.9,
+            "rationale": "Controls were detected.",
+            "required_actions": [],
+            "stop_conditions": ["Do not submit."],
+        }
 
         result = await inspect_job_form(JOB["job_url"])
 
         html_agent.assert_awaited_once_with(JOB)
         visual_agent.assert_awaited_once()
+        workflow_agent.assert_awaited_once()
+        self.assertEqual(result["workflow"]["workflow_type"], "standard_form")
+        self.assertFalse(result["workflow"]["submission_performed"])
         self.assertEqual(result["comparison"]["html_only_fields"], ["resume"])
         self.assertEqual(result["comparison"]["visual_only_fields"], ["email"])
         self.assertNotIn("screenshots", result["agents"]["visual"])

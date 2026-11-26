@@ -98,6 +98,32 @@ def _resume_upload_score(metadata: dict) -> int:
     return 0
 
 
+
+def _external_application_hint(page_text: str, links: list[dict]) -> str | None:
+    """Return a grounded external application URL only when page text clearly redirects applicants."""
+    text = (page_text or "").lower()
+    explicit_redirect = any(phrase in text for phrase in (
+        "instead should use", "instead use", "do not need to complete this",
+        "does not need to complete this application",
+        "use the provided link", "apply through the following", "apply via the following",
+        "you will not be considered unless you complete",
+    ))
+    if not explicit_redirect:
+        return None
+    relevant = []
+    for link in links:
+        signal = " ".join((
+            str(link.get("text") or ""),
+            str(link.get("context") or ""),
+            str(link.get("href") or ""),
+        )).lower()
+        href = str(link.get("href") or "")
+        if href.startswith("https://") and urlparse(href).hostname not in ALLOWED_GREENHOUSE_HOSTS and re.search(r"application|apply|form|register|program|candidate", signal):
+            if href not in relevant:
+                relevant.append(href)
+    return relevant[0] if relevant else None
+
+
 def _validate_greenhouse_url(value: str):
     parsed = urlparse(value)
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_GREENHOUSE_HOSTS:
@@ -284,6 +310,22 @@ class ApplicationSessionManager:
             await page.wait_for_timeout(1800)
             if urlparse(page.url).hostname not in ALLOWED_GREENHOUSE_HOSTS:
                 raise ApplicationAutomationError("Greenhouse redirected outside the supported Greenhouse hosts.")
+
+            # Prevent the auto-fill workflow from filling/submitting a Greenhouse form when
+            # the posting explicitly directs candidates to a different application.
+            page_text = await page.locator("body").inner_text()
+            page_links = await page.locator("a[href]").evaluate_all("""anchors => anchors.map(a => ({
+              text:(a.innerText || a.textContent || '').trim(),
+              href:a.href,
+              context:(a.closest('p, li, section, article')?.innerText || a.parentElement?.innerText || '').trim()
+            }))""")
+            external_application_url = _external_application_hint(page_text, page_links)
+            if external_application_url:
+                raise ApplicationAutomationError(
+                    "This posting instructs applicants to use a separate application. "
+                    "JobPilot stopped before filling this Greenhouse form. External destination: "
+                    + external_application_url
+                )
 
             frame = await self._find_application_frame(page)
             if frame is None:
