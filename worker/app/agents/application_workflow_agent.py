@@ -169,10 +169,14 @@ PAGE EVIDENCE:
         # External URLs must be grounded in collected link evidence.
         known_urls = {str(link.get("href") or "") for link in page.get("links") or []}
         proposed = result.get("external_application_url")
-        if proposed and proposed not in known_urls:
-            result["external_application_url"] = None
+        if proposed:
+            parsed = urlparse(str(proposed))
+            if proposed not in known_urls or parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+                result["external_application_url"] = None
         for link in result.get("relevant_links") or []:
-            if link.get("href") not in known_urls:
+            href = link.get("href")
+            parsed = urlparse(str(href or ""))
+            if href not in known_urls or parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
                 link["href"] = None
         return result
     except (VertexError, json.JSONDecodeError, ValueError, TypeError):
