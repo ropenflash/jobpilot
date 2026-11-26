@@ -188,10 +188,10 @@ export default function JobFormInspectorPage() {
           <div className="text-xs font-semibold tracking-[0.22em] text-cyan-300">DUAL-AGENT INSPECTION</div>
           <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Job form inspector</h1>
           <p className="mt-3 max-w-3xl leading-7 text-slate-400">
-            Paste a public Greenhouse job URL. The HTML agent extracts form-related requirements
-            from source content. The visual agent clicks Apply only when the target is the same
-            Greenhouse job and inspects the form screenshots. Compare findings independently; neither
-            agent fills fields or submits an application.
+            Paste a public Greenhouse job URL. DOM and visual agents discover fields, dropdown options,
+            instructions, and contextual links. A workflow agent classifies normal, conditional,
+            multi-step, or external application flows. This inspection is read-only; it never fills
+            fields or submits an application.
           </p>
         </header>
 
@@ -215,8 +215,9 @@ export default function JobFormInspectorPage() {
             </button>
           </div>
           <p className="mt-3 text-xs text-slate-500">
-            Supports public Greenhouse postings. Playwright may open the same job’s application form;
-            external destinations and final submission are blocked. This is read-only inspection.
+            Supports public Greenhouse postings. The inspector may open the same job’s application form,
+            but it only records external application destinations for review; it does not follow them
+            or submit.
           </p>
         </form>
 
